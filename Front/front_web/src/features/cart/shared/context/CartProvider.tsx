@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { EMPTY_CART, type Cart } from "../../../../entities/cart";
+import type { DeliverySelection } from "../../../../entities/delivery";
 import { useAuth } from "../../../auth";
 import {
   addCartItem,
@@ -32,8 +33,13 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const [cart, setCart] = useState<Cart>(EMPTY_CART);
   const [isLoading, setIsLoading] = useState(false);
+  const [deliverySelection, setDeliverySelection] = useState<DeliverySelection>({});
 
   useEffect(() => {
+    // Un autre compte, un autre panier : ses choix de livraison ne valent plus.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDeliverySelection({});
+
     if (!userId) {
       // Déconnexion : la ressource appartenait à l'utilisateur précédent,
       // elle ne doit pas rester à l'écran.
@@ -87,6 +93,15 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const clear = useCallback(async () => {
     setCart(await clearCartRequest(userId));
+    setDeliverySelection({});
+  }, [userId]);
+
+  // Après une commande, le serveur a vidé le panier : on le relit plutôt que
+  // de supposer son état. Le choix de livraison reste : c'est à l'appelant
+  // de l'oublier quand il n'a plus lieu d'être.
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    setCart(await fetchCart(userId));
   }, [userId]);
 
   const value = useMemo(
@@ -98,8 +113,11 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       setQuantity,
       remove,
       clear,
+      refresh,
+      deliverySelection,
+      setDeliverySelection,
     }),
-    [cart, isLoading, status, add, setQuantity, remove, clear]
+    [cart, isLoading, status, add, setQuantity, remove, clear, refresh, deliverySelection]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

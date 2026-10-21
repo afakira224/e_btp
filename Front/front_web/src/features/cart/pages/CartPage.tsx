@@ -19,7 +19,6 @@ import {
   EmptyState,
 } from "../../catalog/shared/components/CatalogPage";
 import { formatFee } from "../../../entities/delivery";
-import { useAuth } from "../../auth";
 import { useCart } from "../shared/hooks/useCart";
 import { useDeliveryQuote } from "../shared/hooks/useDeliveryQuote";
 import { DeliveryChoices } from "../components/DeliveryChoices";
@@ -127,8 +126,7 @@ const Line = ({
 
 export const CartPage = () => {
   const { cart, isLoading, setQuantity, remove, clear } = useCart();
-  const { user } = useAuth();
-  const delivery = useDeliveryQuote(user?._id ?? "", cart);
+  const delivery = useDeliveryQuote();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -282,16 +280,21 @@ export const CartPage = () => {
           ) : null}
 
           <div className={styles.actions}>
-            {/* La commande n'existe pas encore côté front : plutôt qu'un
-                bouton qui ne ferait rien, on l'annonce. */}
-            <Button fullWidth disabled>
-              Passer commande
-            </Button>
+            {/* Le choix de livraison suit le client : il le retrouve, et peut
+                encore le changer, sur la page de commande. */}
+            {bloquant ? (
+              <Button fullWidth disabled>
+                Passer commande
+              </Button>
+            ) : (
+              <Link to="/commande">
+                <Button fullWidth>Passer commande</Button>
+              </Link>
+            )}
           </div>
 
           <p className={styles.note}>
-            Le tunnel de commande n'est pas encore branché. Les frais affichés
-            sont calculés par le serveur, comme ils le seront à la commande.
+            Frais calculés par le serveur : ce sont ceux qui seront facturés.
           </p>
         </aside>
       </div>

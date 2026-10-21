@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { Address, AddressInput } from "../../../../entities/address";
 import { getFullName } from "../../../../entities/user";
 import { Alert } from "../../../../shared/ui";
@@ -25,6 +25,18 @@ export interface AddressListState {
   feedback?: string;
 }
 
+/**
+ * Page d'où l'on vient, quand ce n'est pas le carnet : la page de commande
+ * envoie ici pour ajouter une adresse, et doit y revenir ensuite.
+ */
+export interface AddressFormState {
+  returnTo?: string;
+}
+
+/** Chemin interne seulement : un `//domaine` sortirait de l'application. */
+const internalPath = (path: unknown): string | undefined =>
+  typeof path === "string" && path.startsWith("/") && !path.startsWith("//") ? path : undefined;
+
 // ─────────────────────────────────────────────
 //  Ajout et modification d'une adresse — pages à part entière :
 //   • /compte/adresses/nouvelle
@@ -40,6 +52,8 @@ export const AddressFormPage = () => {
   const { addressId } = useParams<{ addressId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = internalPath((location.state as AddressFormState | null)?.returnTo);
   const userId = user?._id ?? "";
   const isEdit = addressId !== undefined;
 
@@ -58,7 +72,10 @@ export const AddressFormPage = () => {
   if (!user) return null;
 
   const backToList = (feedback?: string) =>
-    navigate(LIST_PATH, feedback ? { state: { feedback } satisfies AddressListState } : undefined);
+    navigate(
+      returnTo ?? LIST_PATH,
+      feedback ? { state: { feedback } satisfies AddressListState } : undefined
+    );
 
   const submit = async (input: AddressInput) => {
     if (isEdit && addressId) {

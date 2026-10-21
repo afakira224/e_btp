@@ -19,6 +19,8 @@ export const ROUTES = {
   sellerProductEdit: "/ma-boutique/:boutiqueId/produits/:offreId/modifier",
   sellerDelivery: "/ma-boutique/:boutiqueId/livraison",
   panier: "/panier",
+  // Tunnel de commande : livraison par boutique, adresse, confirmation.
+  commande: "/commande",
   favoris: "/favoris",
   recherche: "/recherche",
   nouveautes: "/nouveautes",

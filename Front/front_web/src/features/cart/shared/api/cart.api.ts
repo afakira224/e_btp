@@ -1,6 +1,8 @@
 import { apiClient } from "../../../../shared/api";
 import { EMPTY_CART, type Cart } from "../../../../entities/cart";
+import type { Address } from "../../../../entities/address";
 import type { DeliveryQuote, DeliverySelection } from "../../../../entities/delivery";
+import type { Order } from "../../../../entities/order";
 
 // ─────────────────────────────────────────────
 //  Panier — cinq routes, toutes portant l'identifiant utilisateur dans
@@ -65,13 +67,53 @@ export const fetchDeliveryQuote = async (
   userId: string,
   selection: DeliverySelection
 ): Promise<DeliveryQuote> => {
-  const deliveries = Object.entries(selection).map(([boutiqueId, method]) => ({
-    boutiqueId,
-    method,
-  }));
   const response = await apiClient.post<DeliveryQuote>(`${base(userId)}/delivery-quote`, {
-    deliveries,
+    deliveries: toDeliveries(selection),
   });
   if (!response.data) throw new Error("Devis de livraison indisponible.");
+  return response.data;
+};
+
+const toDeliveries = (selection: DeliverySelection) =>
+  Object.entries(selection).map(([boutiqueId, method]) => ({ boutiqueId, method }));
+
+// ─────────────────────────────────────────────
+//  POST /orders/:userId — checkout depuis le panier.
+//  Le serveur recalcule tout dans sa transaction : stock, prix figés,
+//  livraisons et frais. Il refuse (400) un mode qui n'est plus proposé, un
+//  stock devenu insuffisant ou une livraison sans adresse ; il fige ensuite
+//  la commande et vide le panier.
+// ─────────────────────────────────────────────
+/**
+ * GET /addresses?userId= — le carnet, par défaut en tête. Lu ici plutôt
+ * qu'importé de l'espace compte, qui dépend déjà du panier.
+ */
+export const fetchCheckoutAddresses = async (
+  userId: string,
+  signal?: AbortSignal
+): Promise<Address[]> => {
+  const response = await apiClient.get<Address[]>(
+    `/addresses?userId=${encodeURIComponent(userId)}`,
+    signal
+  );
+  return response.data ?? [];
+};
+
+export interface CheckoutInput {
+  /** Un mode par boutique du panier. */
+  deliveries: DeliverySelection;
+  /** Adresse du carnet ; requise dès qu'une boutique livre. */
+  addressId?: string | undefined;
+  /** Téléphone de contact, utile quand tout est retiré en boutique. */
+  telephone?: string | undefined;
+}
+
+export const placeOrder = async (userId: string, input: CheckoutInput): Promise<Order> => {
+  const response = await apiClient.post<Order>(`/orders/${encodeURIComponent(userId)}`, {
+    deliveries: toDeliveries(input.deliveries),
+    ...(input.addressId ? { addressId: input.addressId } : {}),
+    ...(input.telephone ? { telephone: input.telephone } : {}),
+  });
+  if (!response.data) throw new Error("La commande n'a pas été créée.");
   return response.data;
 };

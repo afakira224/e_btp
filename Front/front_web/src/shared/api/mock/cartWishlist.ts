@@ -1,14 +1,8 @@
 import type { ProductBoutique } from "../../../entities/product";
-import {
-  CURRENCY,
-  DELIVERY_MODES,
-  isDeliveryMode,
-  type DeliveryMode,
-  type DeliveryQuote,
-} from "../../../entities/delivery";
+import { CURRENCY, type DeliveryQuote } from "../../../entities/delivery";
 import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
-import { quoteDelivery } from "./deliveryRules";
+import { quoteDelivery, readSelection } from "./deliveryRules";
 import { findLiveOffer } from "./liveCatalog";
 import { readDb, writeDb } from "./mockDb";
 
@@ -276,8 +270,6 @@ export const clearCart = (userId: string): ApiResponse<CartDto> => {
 //  frais décidés ici. Le corps ne porte que des modes ; tout montant envoyé
 //  est ignoré.
 // ─────────────────────────────────────────────
-const MODES_MESSAGE = `Mode de livraison invalide. Valeurs autorisées : ${DELIVERY_MODES.join(", ")}.`;
-
 export const deliveryQuote = (
   userId: string,
   body: { deliveries?: unknown; deliveryMethod?: unknown } = {}
@@ -285,20 +277,7 @@ export const deliveryQuote = (
   requireSelf(userId);
 
   // Contrôles de forme de deliverySelectionFields : 422, messages joints.
-  const errors: string[] = [];
-  if (body.deliveryMethod !== undefined && !isDeliveryMode(body.deliveryMethod)) errors.push(MODES_MESSAGE);
-  if (body.deliveries !== undefined && !Array.isArray(body.deliveries)) {
-    errors.push("deliveries doit être une liste { boutiqueId, method }.");
-  }
-  const entries = Array.isArray(body.deliveries)
-    ? (body.deliveries as { boutiqueId?: unknown; method?: unknown }[])
-    : [];
-  for (const entry of entries) {
-    if (typeof entry?.boutiqueId !== "string" || !entry.boutiqueId) {
-      errors.push("Identifiant de boutique invalide dans deliveries.");
-    }
-    if (!isDeliveryMode(entry?.method)) errors.push(MODES_MESSAGE);
-  }
+  const { selection, errors } = readSelection(body);
   if (errors.length > 0) throw new ApiError(errors.join(" | "), 422);
 
   const cart = readDb().carts.find((entry) => entry.userId === userId);
@@ -315,13 +294,7 @@ export const deliveryQuote = (
     return offer ? [{ offer, quantity: item.quantity }] : [];
   });
 
-  const byShop: Record<string, DeliveryMode> = {};
-  for (const entry of entries) byShop[String(entry.boutiqueId)] = entry.method as DeliveryMode;
-
-  const quote = quoteDelivery(lines, {
-    byShop,
-    all: isDeliveryMode(body.deliveryMethod) ? body.deliveryMethod : undefined,
-  });
+  const quote = quoteDelivery(lines, selection);
 
   return ok(
     // Coupon exclu : il ne s'applique qu'au checkout, sur les articles.

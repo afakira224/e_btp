@@ -665,6 +665,15 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
   const commande = /^GET \/orders\/([^/]+)$/.exec(key);
   if (commande?.[1]) return account.getOrder(decodeURIComponent(commande[1]));
 
+  // Checkout : l'identifiant est celui de l'utilisateur, pas d'une commande.
+  const checkout = /^POST \/orders\/([^/]+)$/.exec(key);
+  if (checkout?.[1]) {
+    return account.createOrder(
+      decodeURIComponent(checkout[1]),
+      body as Parameters<typeof account.createOrder>[1]
+    );
+  }
+
   const boutique = /^GET \/shops\/([^/]+)$/.exec(key);
   if (boutique?.[1]) return getShop(decodeURIComponent(boutique[1]));
 

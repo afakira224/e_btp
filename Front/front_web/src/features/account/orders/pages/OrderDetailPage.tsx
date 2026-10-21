@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   deliveryMethodLabel,
   DeliveryMethod,
@@ -30,6 +30,11 @@ const ORDERS_CRUMB = { label: "Mes commandes", to: "/compte/commandes" };
 const itemName = (item: OrderItem): string =>
   item.product?.name ?? item.productBoutique?.product?.name ?? "Article retiré du catalogue";
 
+/** Message passé par la page de commande, affiché à l'arrivée. */
+export interface OrderDetailState {
+  feedback?: string;
+}
+
 /** Articles encore commandables : l'offre existe toujours et a du stock. */
 const reorderable = (order: Order) =>
   order.items.filter((item) => item.productBoutique && item.productBoutique.stock > 0);
@@ -43,6 +48,7 @@ const reorderable = (order: Order) =>
 export const OrderDetailPage = () => {
   const { orderId = "" } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+  const feedback = (useLocation().state as OrderDetailState | null)?.feedback;
   const { add } = useCart();
   const [reordering, setReordering] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -121,6 +127,12 @@ export const OrderDetailPage = () => {
           ) : undefined
         }
       />
+
+      {feedback ? (
+        <div className={styles.alert}>
+          <Alert tone="success">{feedback}</Alert>
+        </div>
+      ) : null}
 
       {reorderError ? (
         <div className={styles.alert}>

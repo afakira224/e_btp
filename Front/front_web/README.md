@@ -60,6 +60,7 @@ Le mock ne route que ce que le back monte, avec les mêmes paramètres :
 | `GET /products?search=` | Fiches du catalogue, pour créer une offre |
 | `POST /product-boutiques` · `PUT /product-boutiques/:id` | Création et modification d'une offre (multipart) |
 | `POST /cart/:userId/delivery-quote` | Modes et frais de livraison du panier |
+| `POST /orders/:userId` | Checkout : un mode par boutique, adresse du carnet |
 
 Tris acceptés par `/search` : `newest`, `price_asc`, `price_desc`, `rating`,
 `popular`.
@@ -162,6 +163,7 @@ comptes boutique, société et administrateur passent par une voie interne.
 | `/sous-categories/:sousCategorieId` | Produits d'une sous-catégorie | Ouvert |
 | `/produits/:offreId` | Fiche produit | Ouvert |
 | `/panier` | Panier | Authentifié |
+| `/commande` | Tunnel de commande : livraison par boutique, adresse, confirmation | Authentifié |
 | `/favoris` | Favoris | Authentifié |
 | `/compte` | Espace compte | Authentifié |
 | `/ma-boutique` | Espace vendeur : choix de la boutique (entrée directe s'il n'y en a qu'une) | Boutique, admin |
@@ -356,6 +358,33 @@ additionnés côté client. Le prix fixe est facturé une fois par boutique ; de
 boutiques font deux livraisons. Le devis est relu à chaque changement de quantité
 ou de mode.
 
+Le choix de mode vit dans le contexte du panier (`CartProvider`) : le client le
+retrouve sur la page de commande, et un changement de compte l'efface.
+
+#### Tunnel de commande
+
+`/commande`, sur une seule page, en deux étapes puis une confirmation :
+
+1. **Livraison** — le même choix par boutique que le panier.
+2. **Adresse** — dès qu'une boutique livre, une adresse du carnet est requise ;
+   l'adresse par défaut est présélectionnée. « Ajouter une adresse » ouvre le
+   formulaire du compte, qui ramène ensuite à la commande (`state.returnTo`,
+   chemins internes seulement). Si tout est retiré en boutique, aucune adresse
+   n'est demandée : la page liste les adresses de retrait et propose un
+   téléphone de contact, prérempli depuis le profil.
+
+« Confirmer la commande » n'est actif que si le devis est complet, le stock
+suffisant et l'adresse choisie quand elle est requise. Le front envoie à
+`POST /orders/:userId` les modes (`deliveries`), l'adresse (`addressId`) et
+le téléphone éventuel — **aucun montant**. Le serveur recalcule tout dans sa
+transaction ; s'il refuse (mode retiré entre-temps, stock épuisé), l'erreur
+s'affiche et le devis comme le panier sont relus. En cas de succès, le client
+arrive sur le détail de la commande, qui affiche les livraisons figées, et le
+panier, vidé par le serveur, est relu.
+
+Les coupons ne sont pas proposés dans le tunnel : le back les accepte (`code`),
+le mode simulé ne les porte pas.
+
 ## Espace vendeur « Ma boutique »
 
 Réservé aux comptes `shop` et `admin` (`SellerGuard`), sous `AuthGuard`. On y
@@ -451,7 +480,7 @@ src/
 │   │   ├── domains/        Menu « Domaine » de la navigation
 │   │   ├── product/        Fiche produit
 │   │   └── browse/         Pages familles / catégorie / sous-catégorie
-│   ├── cart/               Panier, choix de livraison par boutique
+│   ├── cart/               Panier, choix de livraison par boutique, tunnel de commande
 │   ├── seller/             Espace « Ma boutique »
 │   │   ├── shared/         API, garde, ossature, éditeur des modes, règles
 │   │   ├── shops/          Choix de la boutique

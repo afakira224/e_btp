@@ -18,7 +18,7 @@ import {
   PromotionsPage,
   SousCategoriePage,
 } from "../../features/catalog";
-import { CartPage } from "../../features/cart";
+import { CartPage, CheckoutPage } from "../../features/cart";
 import { SearchResultsPage } from "../../features/search";
 import { ShopPage, ShopsPage } from "../../features/shops";
 import { WishlistPage } from "../../features/wishlist";
@@ -82,6 +82,7 @@ export const AppRouter = () => (
             protège par requireAuth + requireSelf, la garde fait de même. */}
         <Route element={<AuthGuard />}>
           <Route path={ROUTES.panier} element={<CartPage />} />
+          <Route path={ROUTES.commande} element={<CheckoutPage />} />
           <Route path={ROUTES.favoris} element={<WishlistPage />} />
 
           {/* Espace compte : « Mon compte » présente les rubriques, chacune

@@ -1,2 +1,2 @@
 export { OrdersPage } from "./pages/OrdersPage";
-export { OrderDetailPage } from "./pages/OrderDetailPage";
+export { OrderDetailPage, type OrderDetailState } from "./pages/OrderDetailPage";

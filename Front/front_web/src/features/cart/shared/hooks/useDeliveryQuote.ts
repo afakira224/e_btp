@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Cart } from "../../../../entities/cart";
-import type {
-  DeliveryMode,
-  DeliveryQuote,
-  DeliverySelection,
-} from "../../../../entities/delivery";
+import type { DeliveryMode, DeliveryQuote } from "../../../../entities/delivery";
+import { useAuth } from "../../../auth";
 import { fetchDeliveryQuote } from "../api/cart.api";
+import { useCart } from "./useCart";
 
 // ─────────────────────────────────────────────
 //  useDeliveryQuote
@@ -14,14 +11,20 @@ import { fetchDeliveryQuote } from "../api/cart.api";
 //  modes proposés, frais et total viennent du serveur, jamais d'un calcul
 //  local. Le front n'envoie que des modes.
 //
-//  Un mode choisi pour une boutique sortie du panier est oublié : il ne
-//  doit pas resurgir si elle y revient avec d'autres articles.
+//  Le choix vit dans le contexte du panier : le panier et la page de
+//  commande lisent et modifient le même. Un mode choisi pour une boutique
+//  sortie du panier est oublié : il ne doit pas resurgir si elle y revient
+//  avec d'autres articles.
 // ─────────────────────────────────────────────
-export const useDeliveryQuote = (userId: string, cart: Cart) => {
-  const [selection, setSelection] = useState<DeliverySelection>({});
+export const useDeliveryQuote = () => {
+  const { user } = useAuth();
+  const userId = user?._id ?? "";
+  const { cart, deliverySelection: selection, setDeliverySelection } = useCart();
   const [quote, setQuote] = useState<DeliveryQuote | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Relecture demandée par l'appelant : après un refus du serveur, par exemple.
+  const [revision, setRevision] = useState(0);
 
   // La route n'accepte pas de signal d'annulation : un compteur écarte les
   // réponses arrivées après une requête plus récente.
@@ -50,7 +53,7 @@ export const useDeliveryQuote = (userId: string, cart: Cart) => {
 
         const present = new Set(next.groups.map((group) => group.boutiqueId));
         if (Object.keys(selection).some((boutiqueId) => !present.has(boutiqueId))) {
-          setSelection((previous) =>
+          setDeliverySelection((previous) =>
             Object.fromEntries(Object.entries(previous).filter(([id]) => present.has(id)))
           );
         }
@@ -64,11 +67,16 @@ export const useDeliveryQuote = (userId: string, cart: Cart) => {
     // `cart.items` est lu à travers `cartKey` : l'objet change à chaque écriture
     // même quand les lignes sont identiques.
     // oxlint-disable-next-line react/exhaustive-deps
-  }, [userId, cartKey, selection]);
+  }, [userId, cartKey, selection, revision]);
 
-  const choose = useCallback((boutiqueId: string, method: DeliveryMode) => {
-    setSelection((previous) => ({ ...previous, [boutiqueId]: method }));
-  }, []);
+  const choose = useCallback(
+    (boutiqueId: string, method: DeliveryMode) => {
+      setDeliverySelection((previous) => ({ ...previous, [boutiqueId]: method }));
+    },
+    [setDeliverySelection]
+  );
 
-  return { quote, selection, choose, isLoading, error };
+  const reload = useCallback(() => setRevision((value) => value + 1), []);
+
+  return { quote, selection, choose, reload, isLoading, error };
 };

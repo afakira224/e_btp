@@ -166,6 +166,41 @@ export interface QuoteSelection {
   all?: DeliveryMode | undefined;
 }
 
+const MODES_MESSAGE = `Mode de livraison invalide. Valeurs autorisées : ${DELIVERY_MODES.join(", ")}.`;
+
+/**
+ * deliverySelectionFields + selectionFromBody : le choix du client, lu dans
+ * le corps du devis ou du checkout. Les erreurs de forme sont rendues pour
+ * un 422 ; tout montant présent dans le corps est ignoré.
+ */
+export const readSelection = (body: {
+  deliveries?: unknown;
+  deliveryMethod?: unknown;
+}): { selection: QuoteSelection; errors: string[] } => {
+  const errors: string[] = [];
+  if (body.deliveryMethod !== undefined && !isDeliveryMode(body.deliveryMethod)) errors.push(MODES_MESSAGE);
+  if (body.deliveries !== undefined && !Array.isArray(body.deliveries)) {
+    errors.push("deliveries doit être une liste { boutiqueId, method }.");
+  }
+
+  const byShop: Record<string, DeliveryMode> = {};
+  const entries = Array.isArray(body.deliveries)
+    ? (body.deliveries as { boutiqueId?: unknown; method?: unknown }[])
+    : [];
+  for (const entry of entries) {
+    if (typeof entry?.boutiqueId !== "string" || !entry.boutiqueId) {
+      errors.push("Identifiant de boutique invalide dans deliveries.");
+    }
+    if (!isDeliveryMode(entry?.method)) errors.push(MODES_MESSAGE);
+    else if (typeof entry.boutiqueId === "string") byShop[entry.boutiqueId] = entry.method;
+  }
+
+  return {
+    selection: { byShop, all: isDeliveryMode(body.deliveryMethod) ? body.deliveryMethod : undefined },
+    errors,
+  };
+};
+
 export const quoteDelivery = (
   lines: QuoteLine[],
   selection: QuoteSelection = {}
