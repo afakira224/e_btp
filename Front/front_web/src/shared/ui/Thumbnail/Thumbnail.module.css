@@ -1,0 +1,48 @@
+/* ─────────────────────────────────────────────
+   Vignette produit.
+
+   Le catalogue simulé n'a pas d'`urlImages` : plutôt qu'un carré vide ou
+   une image cassée, on dessine une composition géométrique déterministe,
+   dérivée de l'identifiant. Deux produits différents ne se ressemblent
+   jamais, le même produit garde toujours la même vignette, et le rendu
+   reste dans la palette. Dès que l'API fournit une vraie image, elle prend
+   la place sans rien changer d'autre.
+   ───────────────────────────────────────────── */
+.thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.wide {
+  aspect-ratio: 4 / 3;
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pattern {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Le libellé reste lisible sans écraser le motif. */
+.caption {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}

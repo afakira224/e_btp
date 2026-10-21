@@ -1,0 +1,249 @@
+/* ─────────────────────────────────────────────
+   Écrans d'authentification — composition éditoriale.
+
+   Partition 42/58 plutôt que 50/50 : une symétrie parfaite fige la page,
+   un déséquilibre léger la met en tension et donne la priorité au
+   formulaire, qui est la tâche réelle.
+   ───────────────────────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: 42fr 58fr;
+  min-height: 100vh;
+  background: var(--color-background);
+}
+
+/* ── Colonne d'identité ─────────────────────── */
+.brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-7);
+  padding: var(--space-6) var(--space-7);
+  overflow: hidden;
+
+  background: var(--color-nav);
+  color: var(--color-nav-text);
+
+  /* Tokens redéfinis pour les descendants : un composant posé sur l'aplat
+     sombre hérite de contrastes lisibles sans connaître son contexte. */
+  --color-text: var(--color-nav-text);
+  --color-text-muted: var(--color-nav-muted);
+  --color-border: var(--color-nav-border);
+  --color-border-strong: var(--color-nav-text);
+  --color-surface-alt: var(--color-nav-hover);
+
+  /* Sur un aplat sombre, le bouton primaire doit s'inverser lui aussi :
+     sans cette redéfinition il reprend l'anthracite global et disparaît
+     dans le fond. */
+  --color-primary: var(--color-nav-text);
+  --color-primary-text: var(--color-nav);
+  --color-primary-hover: #ffffff;
+}
+
+/* Trame de fond — évocation du papier millimétré, à la limite du visible.
+   Elle donne de la matière à l'aplat sans jamais concurrencer le texte. */
+.brand::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+      to right,
+      var(--color-nav-text) 1px,
+      transparent 1px
+    ),
+    linear-gradient(to bottom, var(--color-nav-text) 1px, transparent 1px);
+  background-size: 64px 64px;
+  opacity: 0.045;
+}
+
+.brand > * {
+  position: relative;
+}
+
+/* ── En-tête de la colonne ──────────────────── */
+.brandHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wordmark {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+/* Filet + mention technique : le vocabulaire du plan coté, réduit à
+   l'essentiel. C'est ce genre de détail qui distingue une page composée
+   d'une page assemblée. */
+.brandMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  color: var(--color-nav-muted);
+}
+
+.rule {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+/* ── Accroche ───────────────────────────────── */
+.headline {
+  font-size: var(--text-display);
+  font-weight: 600;
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+  text-wrap: balance;
+  max-width: 14ch;
+}
+
+.lede {
+  margin-top: var(--space-4);
+  max-width: 38ch;
+  font-size: var(--text-sm);
+  color: var(--color-nav-muted);
+}
+
+/* ── Index chiffré en pied de colonne ───────── */
+.index {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--color-nav-border);
+}
+
+.indexItem {
+  padding-top: var(--space-4);
+  padding-right: var(--space-3);
+  border-right: 1px solid var(--color-nav-border);
+}
+
+.indexItem:last-child {
+  border-right: none;
+}
+
+.indexValue {
+  display: block;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  /* Chiffres de même chasse : les colonnes restent alignées. */
+  font-variant-numeric: tabular-nums;
+}
+
+.indexLabel {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-nav-muted);
+}
+
+/* ── Colonne de formulaire ──────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6) var(--space-7);
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panelBody {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: var(--space-6) 0;
+}
+
+/* Le formulaire ne vit plus dans une carte flottante : il se pose
+   directement sur la surface, calé sur la colonne. La hiérarchie vient de
+   l'échelle du titre et des filets, pas d'une ombre portée. */
+.form {
+  width: 100%;
+  max-width: 400px;
+}
+
+.eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.title {
+  margin-top: var(--space-3);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  color: var(--color-text);
+}
+
+.subtitle {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.content {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+
+.footer {
+  margin-top: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ── Tablette : la colonne d'identité se replie en bandeau ── */
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .brand {
+    gap: var(--space-5);
+    padding: var(--space-5);
+  }
+
+  .headline {
+    font-size: var(--text-xl);
+    letter-spacing: var(--tracking-tight);
+    max-width: none;
+  }
+
+  .lede,
+  .index {
+    display: none;
+  }
+
+  .panel {
+    padding: var(--space-4);
+  }
+
+  .panelBody {
+    align-items: flex-start;
+    padding: var(--space-5) 0;
+  }
+
+  .form {
+    max-width: none;
+  }
+}

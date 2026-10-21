@@ -1,0 +1,45 @@
+.alert {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+}
+
+/* Les couleurs fonctionnelles portent du sens : elles restent hors palette
+   Platinum Mist, et le pictogramme double l'information pour ne pas
+   dépendre de la seule couleur. */
+.danger {
+  background: var(--color-danger-surface);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.success {
+  background: var(--color-success-surface);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.warning {
+  background: var(--color-warning-surface);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.info {
+  background: var(--color-surface-alt);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.icon {
+  flex-shrink: 0;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.content {
+  flex: 1;
+}

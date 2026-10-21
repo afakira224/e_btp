@@ -1,0 +1,134 @@
+.layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* La colonne de filtres suit le défilement, sous l'en-tête collant. */
+.aside {
+  position: sticky;
+  top: calc(var(--header-height) + var(--space-5));
+  max-height: calc(100vh - var(--header-height) - var(--space-6));
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.main {
+  min-width: 0;
+}
+
+/* En-tête et pied du panneau : utiles seulement en plein écran mobile. */
+.sheetHead,
+.sheetFoot {
+  display: none;
+}
+
+/* ── Recherches récentes ────────────────────── */
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.recentLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.recentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recentLink {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.recentLink:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
+}
+
+/* Sous 900px, les filtres quittent la colonne et deviennent un panneau
+   plein écran, ouvert par le bouton « Filtres » de la barre d'outils. */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .aside {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    max-height: none;
+    padding: 0 var(--space-4);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--color-surface);
+  }
+
+  .asideOpen {
+    display: block;
+  }
+
+  .sheetHead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    margin-bottom: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .sheetTitle {
+    font-weight: 600;
+  }
+
+  .sheetClose {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-lg);
+    cursor: pointer;
+  }
+
+  .sheetFoot {
+    position: sticky;
+    bottom: 0;
+    display: block;
+    margin-top: var(--space-5);
+    padding: var(--space-3) 0 var(--space-4);
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+}

@@ -1,0 +1,43 @@
+.shops {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: grid;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color var(--transition);
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.name {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-weight: 600;
+}
+
+.address {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.skeleton {
+  height: 160px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}

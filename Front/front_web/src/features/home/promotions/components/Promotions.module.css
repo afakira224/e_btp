@@ -1,0 +1,172 @@
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  padding-bottom: var(--space-7);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-5);
+  min-height: 260px;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+}
+
+/* Vente flash : seul bloc de la page où l'accent occupe une surface pleine.
+   C'est ce qui lui donne sa force — s'il y en avait trois, il n'y en aurait
+   plus aucun. */
+.flash {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+
+  --color-text: var(--color-accent-text);
+  --color-border: rgba(255, 255, 255, 0.35);
+  --color-border-strong: var(--color-accent-text);
+  --color-surface-alt: rgba(255, 255, 255, 0.16);
+  --color-primary: var(--color-accent-text);
+  --color-primary-text: var(--color-accent);
+  --color-primary-hover: var(--color-accent-text);
+}
+
+/* Bloc d'attente : occupe exactement la place du panneau à venir, pour que
+   la grille ne sursaute pas quand la promotion arrive. */
+.loading {
+  background: var(--color-surface-alt);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading {
+    animation: none;
+  }
+}
+
+.collection {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-nav);
+  color: var(--color-nav-text);
+
+  --color-text: var(--color-nav-text);
+  --color-border: var(--color-nav-border);
+  --color-border-strong: var(--color-nav-text);
+  --color-surface-alt: var(--color-nav-hover);
+  --color-primary: var(--color-nav-text);
+  --color-primary-text: var(--color-nav);
+  --color-primary-hover: #ffffff;
+}
+
+.collection::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(to right, currentColor 1px, transparent 1px),
+    linear-gradient(to bottom, currentColor 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.05;
+}
+
+.panel > * {
+  position: relative;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.title {
+  margin-top: var(--space-3);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  line-height: 1.1;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+.text {
+  margin-top: var(--space-3);
+  max-width: 40ch;
+  font-size: var(--text-sm);
+  opacity: 0.85;
+}
+
+/* ── Compte à rebours ───────────────────────── */
+.timer {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.unit {
+  min-width: 58px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.unitValue {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.unitLabel {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .panel {
+    padding: var(--space-5);
+  }
+
+  .timer {
+    gap: var(--space-2);
+  }
+
+  .unit {
+    min-width: 0;
+    flex: 1;
+    padding: var(--space-2);
+  }
+}

@@ -1,0 +1,32 @@
+.rating {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Les étoiles sont dessinées en deux couches superposées : une grise pleine,
+   une sombre tronquée à la largeur de la note. Cela évite les demi-étoiles
+   approximatives et rend 4,7 exactement comme 4,7. */
+.track {
+  position: relative;
+  display: inline-block;
+  font-size: var(--text-sm);
+  line-height: 1;
+  letter-spacing: 1px;
+  color: var(--color-border);
+  white-space: nowrap;
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

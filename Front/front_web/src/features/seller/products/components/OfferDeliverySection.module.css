@@ -1,0 +1,129 @@
+.section {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-5) 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.legend {
+  float: left; /* sort la légende de la bordure du fieldset */
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+}
+
+.legend + * {
+  clear: both;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.choice:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* Le choix retenu se lit au trait, pas à la couleur. */
+.choice:has(input:checked) {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.choice input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--color-primary);
+}
+
+.choiceText {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.choiceTitle {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.choiceHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.inherited,
+.custom {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.inherited {
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.origin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.originTag {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.muted {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.muted a {
+  color: var(--color-text);
+}
+
+.warning {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-surface);
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+}
+
+@media (max-width: 680px) {
+  .choices {
+    grid-template-columns: 1fr;
+  }
+}

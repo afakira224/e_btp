@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Écran de lancement natif (avant Android 12) : fond anthracite, logo au centre. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/chrome" />
+    <item android:drawable="@drawable/splash_logo" android:gravity="center" android:width="112dp" android:height="112dp" />
+</layer-list>

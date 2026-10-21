@@ -1,0 +1,13 @@
+{
+  // Vérification de types des tests uniquement (npm run typecheck:tests).
+  // Le build de production (tsconfig.json) ignore le dossier tests/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "multer"],
+    // Les fabriques de test construisent des documents partiels :
+    // on relâche cette règle, trop stricte pour des fixtures.
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}

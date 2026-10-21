@@ -1,0 +1,131 @@
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.reset {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.reset:hover {
+  color: var(--color-text);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.legend {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ── Prix ───────────────────────────────────── */
+.priceRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.priceField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.priceLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.priceInput {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.priceInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.dash {
+  padding-bottom: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ── Cases ──────────────────────────────────── */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* Sous 900px, les filtres s'ouvrent dans un panneau qui porte déjà son
+   propre titre (SearchResultsPage) : on n'en affiche pas un second. */
+@media (max-width: 900px) {
+  .head {
+    justify-content: flex-end;
+  }
+
+  .title {
+    display: none;
+  }
+
+  /* Sans « Tout effacer », la ligne serait vide. */
+  .head:not(:has(button)) {
+    display: none;
+  }
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
