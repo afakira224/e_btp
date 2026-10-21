@@ -1,0 +1,187 @@
+/* ─────────────────────────────────────────────
+   Design tokens — Platinum Mist
+   Aucun composant ne code une couleur en dur : tout passe par ces variables.
+   ───────────────────────────────────────────── */
+
+:root,
+:root[data-theme="light"] {
+  /* Tokens sémantiques */
+  --color-primary: #2b2e33;
+  --color-primary-text: #f5f6f7;
+  --color-primary-hover: #3a3e45;
+
+  /* Navigation — header, sidebar, colonne de marque.
+     La charte les montre en #2B2E33 en mode clair ET en mode sombre :
+     ils ne suivent donc pas l'inversion de --color-primary. */
+  --color-nav: #2b2e33;
+  --color-nav-text: #f5f6f7;
+  --color-nav-muted: rgba(245, 246, 247, 0.72);
+  --color-nav-border: rgba(245, 246, 247, 0.24);
+  --color-nav-hover: rgba(245, 246, 247, 0.12);
+
+  /* Accent commerce — hors palette Platinum Mist, comme les couleurs
+     fonctionnelles du §10 de la charte. Il ne porte qu'une information :
+     « ici il y a une remise ». Une boutique monochrome ne peut pas signaler
+     un prix barré, une vente flash ou un appel à l'achat sans lui.
+     Usage strictement rationné : badges de remise, compte à rebours,
+     bandeau de déstockage. */
+  --color-accent: #d1481f;
+  --color-accent-text: #ffffff;
+  --color-accent-surface: #fdeee9;
+
+  --color-secondary: #7b7f85;
+  --color-secondary-text: #f5f6f7;
+
+  --color-background: #f5f6f7;
+  --color-surface: #ffffff;
+  --color-surface-alt: #e8eaec;
+
+  --color-border: #c1c4c8;
+  --color-border-strong: #a8acb2;
+
+  --color-text: #2b2e33;
+  --color-text-muted: #7b7f85;
+
+  /* États fonctionnels — indépendants de la palette, ils portent du sens */
+  --color-success: #1f7a4d;
+  --color-success-surface: #e6f2ec;
+  --color-warning: #8a6100;
+  --color-warning-surface: #fdf3e0;
+  --color-danger: #a32222;
+  --color-danger-surface: #fbeaea;
+
+  --shadow-card: 0 4px 12px rgba(43, 46, 51, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(43, 46, 51, 0.12);
+}
+
+:root[data-theme="dark"] {
+  --color-primary: #f5f6f7;
+  --color-primary-text: #2b2e33;
+  --color-primary-hover: #e2e4e6;
+
+  --color-nav: #2b2e33;
+  --color-nav-text: #f5f6f7;
+  --color-nav-muted: rgba(245, 246, 247, 0.72);
+  --color-nav-border: rgba(245, 246, 247, 0.24);
+  --color-nav-hover: rgba(245, 246, 247, 0.12);
+
+  /* Éclairci sur fond anthracite pour tenir le contraste AA. */
+  --color-accent: #ff7a52;
+  --color-accent-text: #2b2e33;
+  --color-accent-surface: #3a2820;
+
+  --color-secondary: #7b7f85;
+  --color-secondary-text: #f5f6f7;
+
+  --color-background: #212428;
+  --color-surface: #2b2e33;
+  --color-surface-alt: #3a3e45;
+
+  --color-border: #4a4e55;
+  --color-border-strong: #7b7f85;
+
+  --color-text: #f5f6f7;
+  --color-text-muted: #c1c4c8;
+
+  /* Variantes éclaircies : le contraste AA doit tenir sur fond anthracite */
+  --color-success: #6ed9a4;
+  --color-success-surface: #21382e;
+  --color-warning: #f0c069;
+  --color-warning-surface: #3a3121;
+  --color-danger: #f28b8b;
+  --color-danger-surface: #3a2525;
+
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-focus: 0 0 0 3px rgba(245, 246, 247, 0.16);
+}
+
+/* Le thème suit le système tant que l'utilisateur n'a rien choisi. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-primary: #f5f6f7;
+    --color-primary-text: #2b2e33;
+    --color-primary-hover: #e2e4e6;
+
+    --color-nav: #2b2e33;
+    --color-nav-text: #f5f6f7;
+    --color-nav-muted: rgba(245, 246, 247, 0.72);
+    --color-nav-border: rgba(245, 246, 247, 0.24);
+    --color-nav-hover: rgba(245, 246, 247, 0.12);
+
+    --color-accent: #ff7a52;
+    --color-accent-text: #2b2e33;
+    --color-accent-surface: #3a2820;
+
+    --color-background: #212428;
+    --color-surface: #2b2e33;
+    --color-surface-alt: #3a3e45;
+
+    --color-border: #4a4e55;
+    --color-border-strong: #7b7f85;
+
+    --color-text: #f5f6f7;
+    --color-text-muted: #c1c4c8;
+
+    --color-success: #6ed9a4;
+    --color-success-surface: #21382e;
+    --color-warning: #f0c069;
+    --color-warning-surface: #3a3121;
+    --color-danger: #f28b8b;
+    --color-danger-surface: #3a2525;
+
+    --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-focus: 0 0 0 3px rgba(245, 246, 247, 0.16);
+  }
+}
+
+:root {
+  /* Palette brute — ne pas consommer directement dans les composants.
+     Elle est l'identité de marque : elle ne change pas avec le thème. */
+  --platinum-100: #f5f6f7;
+  --platinum-300: #c1c4c8;
+  --platinum-600: #7b7f85;
+  --platinum-900: #2b2e33;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  /* Échelle d'affichage : elle porte la hiérarchie à la place de la couleur,
+     que la palette monochrome ne peut pas fournir. clamp() évite une
+     typographie monumentale qui déborderait sur petit écran. */
+  --text-display: clamp(2.5rem, 4.4vw, 3.75rem);
+
+  /* Plus le texte est grand, plus il doit être serré pour rester dense. */
+  --tracking-display: -0.035em;
+  --tracking-tight: -0.015em;
+  --tracking-wide: 0.08em;
+  --tracking-mono: 0.06em;
+
+  --leading-display: 1.04;
+
+  --transition: 160ms ease;
+
+  /* Hauteur de l'en-tête collant (ligne outils 64px + ligne navigation 44px) :
+     les éléments `sticky` des pages se calent dessous. */
+  --header-height: 109px;
+}

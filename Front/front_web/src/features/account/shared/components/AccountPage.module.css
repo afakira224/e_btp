@@ -1,0 +1,14 @@
+/* Vertical seulement : l'horizontal est celui de `.container`. */
+.page {
+  padding-block: var(--space-6) var(--space-7);
+}
+
+.narrow {
+  max-width: 880px;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding-block: var(--space-5) var(--space-6);
+  }
+}

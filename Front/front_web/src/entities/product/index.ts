@@ -1,0 +1,18 @@
+export {
+  categorieOf,
+  discountPercent,
+  effectivePrice,
+  familleOf,
+  formatPrice,
+  hasDiscount,
+  isLowStock,
+  isNew,
+  isOutOfStock,
+  productDescription,
+  productImage,
+  productName,
+  shopName,
+  sousCategorieOf,
+  type Product,
+  type ProductBoutique,
+} from "./model/product.types";

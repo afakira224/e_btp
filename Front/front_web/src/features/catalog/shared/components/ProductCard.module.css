@@ -1,0 +1,196 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: border-color var(--transition);
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.media {
+  position: relative;
+}
+
+/* Les badges se posent sur la vignette, en haut à gauche ; l'action
+   « favoris » occupe le coin opposé. Rien ne se chevauche. */
+.flags {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  z-index: 1;
+}
+
+.wish {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.wish:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.wishOn {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.shop {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Le lien vers la boutique passe au-dessus du calque cliquable de la
+   carte : sans cela, le clic ouvrirait la fiche produit. */
+.shopLink {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.shopLink:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Le lien du titre s'étend à toute la carte grâce à un calque invisible :
+   la cible de clic couvre la vignette et le nom, sans imbriquer les boutons
+   dans une ancre — ce qui serait invalide et casserait le clavier. */
+.nameLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.nameLink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.card:hover .nameLink {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+  /* Deux lignes maximum : les cartes d'une même rangée gardent la même
+     hauteur quel que soit le nom du produit. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.prices {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: auto;
+}
+
+.price {
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+}
+
+.was {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.stock {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.low {
+  color: var(--color-warning);
+}
+
+.out {
+  color: var(--color-text-muted);
+}
+
+.add {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.add:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.add:disabled {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}

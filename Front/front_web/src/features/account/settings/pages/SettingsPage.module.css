@@ -1,0 +1,8 @@
+.stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.alert {
+  margin-bottom: var(--space-3);
+}

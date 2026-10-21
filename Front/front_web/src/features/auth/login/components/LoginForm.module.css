@@ -1,0 +1,26 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: calc(var(--space-3) * -1);
+}
+
+/* Lien discret : le soulignement n'apparaît qu'au survol, avec un décalage
+   qui laisse respirer les jambages. */
+.link {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  border-bottom: none;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}

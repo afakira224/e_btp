@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Écran de lancement natif : affiché pendant le démarrage du processus,
+         retiré quand Flutter dessine sa première image (l'écran Splash Flutter,
+         identique, prend le relais sans saut visuel). -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:statusBarColor">@color/chrome</item>
+        <item name="android:navigationBarColor">@color/chrome</item>
+    </style>
+    <!-- Fond de la fenêtre derrière Flutter : anthracite, pas de flash blanc. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/chrome</item>
+    </style>
+</resources>

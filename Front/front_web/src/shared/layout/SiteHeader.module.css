@@ -1,0 +1,241 @@
+/* Bandeau d'annonce — la seule bande pleine largeur au-dessus du header. */
+.announce {
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+}
+
+.announceInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  height: 34px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.announceItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  opacity: 0.9;
+}
+
+/* ── Header ─────────────────────────────────── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.headerInner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  height: 64px;
+}
+
+.brand {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* ── Ligne de navigation ────────────────────── */
+.navRow {
+  border-top: 1px solid var(--color-border);
+}
+
+.nav {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-5);
+  height: 44px;
+}
+
+.link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition);
+}
+
+.link:hover {
+  color: var(--color-text);
+}
+
+/* L'onglet actif est souligné d'un filet plein, pas coloré : la palette ne
+   fournit pas d'accent pour la navigation, et n'en a pas besoin. */
+.active {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--color-text);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.icon:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* Compteur du panier : chiffre tabulaire pour que la pastille ne saute pas
+   entre 9 et 10. */
+.count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.account:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
+}
+
+/* Sous 1100px la navigation passe en défilement horizontal plutôt que de
+   se replier dans un menu : six entrées ne justifient pas un tiroir. Le
+   seuil est couplé au panneau du menu « Domaine » (DomainMenu.module.css),
+   qui passe en `fixed` au même moment pour échapper au rognage.
+   `min-width: 0` est indispensable — sans lui un enfant flex refuse de
+   passer sous la taille de son contenu et le défilement ne s'active jamais. */
+@media (max-width: 1100px) {
+  .nav {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Sous 900px la recherche prend sa propre ligne, pleine largeur, sous la
+   marque et les outils : réduite entre les deux, elle ne laisserait voir
+   que trois lettres de la saisie. */
+@media (max-width: 900px) {
+  .headerInner {
+    height: auto;
+    flex-wrap: wrap;
+    row-gap: var(--space-3);
+    /* Vertical seulement : le padding horizontal reste celui de `.container`. */
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+  }
+
+  .brand {
+    order: 1;
+  }
+
+  .tools {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .search {
+    order: 3;
+    flex: 0 0 100%;
+    max-width: none;
+  }
+
+  .nav {
+    gap: var(--space-4);
+  }
+}
+
+@media (max-width: 720px) {
+  /* Le bandeau défile au doigt plutôt que de tronquer les annonces. */
+  .announceInner {
+    gap: var(--space-4);
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .announceInner::-webkit-scrollbar {
+    display: none;
+  }
+
+  .headerInner {
+    gap: var(--space-2);
+  }
+
+  .accountLabel {
+    display: none;
+  }
+}
