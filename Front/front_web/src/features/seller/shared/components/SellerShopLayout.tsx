@@ -17,8 +17,8 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
 
 // ─────────────────────────────────────────────
 //  Ossature d'une boutique — /ma-boutique/:boutiqueId/…
-//  Charge la boutique une fois pour ses rubriques (produits, livraison,
-//  informations) et la leur passe par le contexte de l'Outlet.
+//  Charge la boutique une fois pour ses rubriques (commandes, produits,
+//  livraison, informations) et la leur passe par le contexte de l'Outlet.
 // ─────────────────────────────────────────────
 export const SellerShopLayout = () => {
   const { boutiqueId = "" } = useParams<{ boutiqueId: string }>();
@@ -79,6 +79,9 @@ export const SellerShopLayout = () => {
       />
 
       <nav className={styles.tabs} aria-label="Rubriques de la boutique">
+        <NavLink className={tabClass} to={sellerPaths.orders(data.id)}>
+          Commandes
+        </NavLink>
         <NavLink className={tabClass} to={sellerPaths.products(data.id)}>
           Produits
         </NavLink>

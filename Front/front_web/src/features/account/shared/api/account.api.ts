@@ -103,9 +103,3 @@ export const fetchOrders = async (
     hasMore: data.page < data.totalPages,
   };
 };
-
-export const fetchOrder = async (id: string, signal?: AbortSignal): Promise<Order> => {
-  const response = await apiClient.get<Order>(`/orders/${encodeURIComponent(id)}`, signal);
-  if (!response.data) throw new Error("Commande introuvable.");
-  return response.data;
-};

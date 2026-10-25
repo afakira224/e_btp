@@ -3,6 +3,7 @@
 // vérifie de son côté que la boutique appartient bien au compte.
 export { SellerGuard, SellerShopLayout } from "./shared";
 export { SellerHomePage } from "./shops";
+export { ShopOrderPage, ShopOrdersPage } from "./orders";
 export { ShopDeliveryPage } from "./delivery";
 export { OfferFormPage, OffersPage } from "./products";
 export { ShopInfoPage } from "./settings";

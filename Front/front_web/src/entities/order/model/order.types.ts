@@ -1,6 +1,7 @@
 import { DELIVERY_MODE_LABELS, type DeliveryMode } from "../../delivery";
 import type { Product, ProductBoutique } from "../../product";
 import type { Shop } from "../../shop";
+import type { PaymentMethod, ShopOrder, StatusTone } from "./shopOrder.types";
 
 // ─────────────────────────────────────────────
 //  Commande — miroir de OrderResponseDto
@@ -11,15 +12,32 @@ import type { Shop } from "../../shop";
 //  figé est `price`, pas celui de l'offre actuelle.
 // ─────────────────────────────────────────────
 
+// Le statut global se déduit des sous-commandes (une par boutique).
+// `pending`, `confirmed`, `shipped` et `delivered` sont ceux des commandes
+// d'avant les sous-commandes : lisibles, plus produits.
 export const OrderStatus = {
+  AWAITING_PAYMENT: "awaiting_payment",
+  PAYMENT_FAILED: "payment_failed",
+  IN_PROGRESS: "in_progress",
+  COMPLETED: "completed",
+  PARTIALLY_COMPLETED: "partially_completed",
+  CANCELLED: "cancelled",
   PENDING: "pending",
   CONFIRMED: "confirmed",
   SHIPPED: "shipped",
   DELIVERED: "delivered",
-  CANCELLED: "cancelled",
 } as const;
 
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
+
+export const OrderPaymentStatus = {
+  ON_DELIVERY: "on_delivery",
+  PENDING: "pending",
+  PAID: "paid",
+  FAILED: "failed",
+} as const;
+
+export type OrderPaymentStatus = (typeof OrderPaymentStatus)[keyof typeof OrderPaymentStatus];
 
 // Mode résumé de la commande : celui de toutes ses livraisons, ou `mixed`
 // quand les boutiques n'ont pas le même. `standard` et `express` sont ceux
@@ -77,8 +95,16 @@ export interface Order {
   id: string;
   userId: string;
   reference: string;
+  /** Se déduit des sous-commandes. */
   status: OrderStatus;
   statusHistory: OrderStatusStep[];
+  paymentMethod: PaymentMethod;
+  paymentStatus: OrderPaymentStatus;
+  paidAt: string | null;
+  /** Échéance d'un paiement en ligne pas encore confirmé. */
+  paymentExpiresAt: string | null;
+  /** Une sous-commande par boutique, chacune avec son statut et ses actions. */
+  parts: ShopOrder[];
   items: OrderItem[];
   totalItems: number;
   subtotal: number;
@@ -97,11 +123,36 @@ export interface Order {
 }
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  awaiting_payment: "En attente de paiement",
+  payment_failed: "Paiement échoué",
+  in_progress: "En cours",
+  completed: "Terminée",
+  partially_completed: "Partiellement terminée",
+  cancelled: "Annulée",
   pending: "En attente",
   confirmed: "Confirmée",
   shipped: "Expédiée",
   delivered: "Livrée",
-  cancelled: "Annulée",
+};
+
+export const ORDER_STATUS_TONES: Record<OrderStatus, StatusTone> = {
+  awaiting_payment: "warning",
+  payment_failed: "danger",
+  in_progress: "progress",
+  completed: "success",
+  partially_completed: "success",
+  cancelled: "danger",
+  pending: "warning",
+  confirmed: "progress",
+  shipped: "progress",
+  delivered: "success",
+};
+
+export const ORDER_PAYMENT_LABELS: Record<OrderPaymentStatus, string> = {
+  on_delivery: "À payer à la remise",
+  pending: "Paiement en attente",
+  paid: "Payée",
+  failed: "Paiement échoué",
 };
 
 export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
@@ -115,14 +166,13 @@ export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
 export const deliveryMethodLabel = (method: string): string =>
   DELIVERY_METHOD_LABELS[method as DeliveryMethod] ?? "Livraison";
 
-/** Parcours normal d'une commande, dans l'ordre. L'annulation en sort. */
-export const ORDER_FLOW: readonly OrderStatus[] = [
-  OrderStatus.PENDING,
-  OrderStatus.CONFIRMED,
-  OrderStatus.SHIPPED,
+const ORDER_ENDED: readonly OrderStatus[] = [
+  OrderStatus.PAYMENT_FAILED,
+  OrderStatus.COMPLETED,
+  OrderStatus.PARTIALLY_COMPLETED,
+  OrderStatus.CANCELLED,
   OrderStatus.DELIVERED,
 ];
 
-/** Commande encore vivante : ni livrée, ni annulée. */
-export const isOrderInProgress = (order: Pick<Order, "status">): boolean =>
-  order.status !== OrderStatus.DELIVERED && order.status !== OrderStatus.CANCELLED;
+/** Commande encore vivante : paiement attendu ou une boutique au moins pas finie. */
+export const isOrderInProgress = (order: Pick<Order, "status">): boolean => !ORDER_ENDED.includes(order.status);

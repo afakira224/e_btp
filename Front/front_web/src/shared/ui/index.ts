@@ -6,6 +6,7 @@ export { Choices, type ChoiceOption } from "./Choices";
 export { Input } from "./Input";
 export { Select, type SelectOption } from "./Select";
 export { Spinner } from "./Spinner";
+export { StatusBadge, type StatusBadgeTone } from "./StatusBadge";
 export { TextArea } from "./TextArea";
 export { Thumbnail } from "./Thumbnail";
 export { ThemeToggle } from "./ThemeToggle";

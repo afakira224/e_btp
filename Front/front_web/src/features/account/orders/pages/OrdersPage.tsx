@@ -9,27 +9,34 @@ import styles from "./OrdersPage.module.css";
 
 const STATUS_PARAM = "statut";
 
-/** Filtres proposés, dans l'ordre de vie d'une commande. */
-const FILTERS: readonly (OrderStatus | undefined)[] = [
+/**
+ * Filtres proposés, dans l'ordre de vie d'une commande. Le statut global se
+ * déduit des boutiques : « en cours » tant que l'une d'elles n'a pas fini.
+ */
+const FILTERS = [
   undefined,
-  OrderStatus.PENDING,
-  OrderStatus.CONFIRMED,
-  OrderStatus.SHIPPED,
-  OrderStatus.DELIVERED,
+  OrderStatus.AWAITING_PAYMENT,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.COMPLETED,
+  OrderStatus.PARTIALLY_COMPLETED,
   OrderStatus.CANCELLED,
-];
+  OrderStatus.PAYMENT_FAILED,
+] as const;
+
+type FilterStatus = Exclude<(typeof FILTERS)[number], undefined>;
 
 /** Un filtre désigne un ensemble de commandes : au pluriel, contrairement au badge. */
-const FILTER_LABELS: Record<OrderStatus, string> = {
-  pending: "En attente",
-  confirmed: "Confirmées",
-  shipped: "Expédiées",
-  delivered: "Livrées",
+const FILTER_LABELS: Record<FilterStatus, string> = {
+  awaiting_payment: "À payer",
+  in_progress: "En cours",
+  completed: "Terminées",
+  partially_completed: "En partie",
   cancelled: "Annulées",
+  payment_failed: "Paiement échoué",
 };
 
-const isStatus = (value: string | null): value is OrderStatus =>
-  value !== null && Object.values(OrderStatus).includes(value as OrderStatus);
+const isStatus = (value: string | null): value is FilterStatus =>
+  value !== null && (FILTERS as readonly (string | undefined)[]).includes(value);
 
 // ─────────────────────────────────────────────
 //  Mes commandes — /compte/commandes?statut=…
@@ -52,7 +59,7 @@ export const OrdersPage = () => {
     <AccountPage width="narrow">
       <AccountHeader
         title="Mes commandes"
-        lede="Suivez l'avancement de vos commandes, de la confirmation par le dépôt jusqu'à la livraison."
+        lede="Suivez chaque commande boutique par boutique, de la confirmation à la livraison, et agissez en cas de souci."
         trail={[{ label: "Mes commandes" }]}
       />
 

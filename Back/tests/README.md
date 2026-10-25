@@ -37,17 +37,20 @@ tests/
 │   └── validation.ts            # exécution de ValidationChain sans serveur Express
 └── unit/
     ├── controllers/             # contrôleurs : codes HTTP, règles métier, transactions
+    ├── migrations/              # découpage des commandes existantes en sous-commandes
     └── shared/
         ├── BaseResponse.test.ts
         ├── middlewares/         # authentification, rôles, erreurs, validation
         ├── forms/               # règles express-validator
-        ├── helpers/             # fileUpload (fs simulé)
-        └── interfaces/          # mappers DTO et calculs de promotion
+        ├── helpers/             # fileUpload (fs simulé), workflow des sous-commandes, transactions
+        ├── interfaces/          # mappers DTO et calculs de promotion
+        ├── payment/             # choix du prestataire de paiement
+        └── services/            # actions sur les sous-commandes, paiement, délais, avis
 ```
 
 ## Périmètre couvert
 
-**697 tests**, environ 84 % des lignes de `src/`.
+**1 277 tests**.
 
 | Domaine | Fichiers testés |
 | --- | --- |
@@ -58,7 +61,8 @@ tests/
 | Règles métier pures | `computePromotionDiscount`, `isPromotionActive` |
 | Validation | formulaires panier, commande, avis, favoris, adresse, promotion |
 | Fichiers | `fileUpload` (URL publique, suppression, limites de taille) |
-| Contrôleurs | auth, panier, commande, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, demande de boutique, famille, catégorie, sous-catégorie |
+| Contrôleurs | auth, panier, commande, sous-commande, paiement, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, demande de boutique, famille, catégorie, sous-catégorie |
+| Cycle de vie des commandes | règles des actions (`shopOrder.workflow`), effets (`shopOrder.service` : stock, remboursements, statut de la commande), paiement en ligne, délais automatiques, avis par email, migration des commandes existantes |
 
 ## Écrire un nouveau test de contrôleur
 

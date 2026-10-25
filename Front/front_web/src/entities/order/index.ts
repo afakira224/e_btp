@@ -3,8 +3,10 @@ export {
   DeliveryMethod,
   deliveryMethodLabel,
   isOrderInProgress,
-  ORDER_FLOW,
+  ORDER_PAYMENT_LABELS,
   ORDER_STATUS_LABELS,
+  ORDER_STATUS_TONES,
+  OrderPaymentStatus,
   OrderStatus,
   type Order,
   type OrderDelivery,
@@ -12,3 +14,4 @@ export {
   type OrderStatusStep,
   type ShippingAddress,
 } from "./model/order.types";
+export * from "./model/shopOrder.types";

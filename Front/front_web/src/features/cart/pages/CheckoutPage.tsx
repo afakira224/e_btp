@@ -3,11 +3,13 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Address } from "../../../entities/address";
 import { hasBlockingIssue } from "../../../entities/cart";
 import { DeliveryMode, formatFee } from "../../../entities/delivery";
+import { PAYMENT_METHOD_LABELS, PaymentMethod } from "../../../entities/order";
 import { formatPrice } from "../../../entities/product";
 import { ApiError } from "../../../shared/api";
 import { useDocumentTitle } from "../../../shared/hooks/useDocumentTitle";
-import { Alert, Button, Input } from "../../../shared/ui";
+import { Alert, Button, Choices, Input } from "../../../shared/ui";
 import type { OrderDetailState } from "../../account";
+import { paymentDestination } from "../../orders";
 import { useAuth } from "../../auth";
 import {
   CatalogHeader,
@@ -37,11 +39,13 @@ const validPhone = (value: string) => {
 
 // ─────────────────────────────────────────────
 //  Commande — /commande
-//  Trois décisions, dans l'ordre : un mode de livraison par boutique, une
-//  adresse si une boutique livre, puis la confirmation. Les frais et le
-//  total sont ceux du devis serveur ; à la validation, le serveur recalcule
-//  tout dans sa transaction et refuse ce qui ne tient plus (stock, mode
-//  retiré entre-temps). La commande fige alors livraisons et frais.
+//  Quatre décisions, dans l'ordre : un mode de livraison par boutique, une
+//  adresse si une boutique livre, le paiement, puis la confirmation. Les
+//  frais et le total sont ceux du devis serveur ; à la validation, le serveur
+//  recalcule tout dans sa transaction et refuse ce qui ne tient plus (stock,
+//  mode retiré entre-temps). La commande fige alors livraisons et frais.
+//  Payée en ligne, elle n'est transmise aux boutiques qu'une fois le paiement
+//  confirmé : on part vers la page du prestataire.
 // ─────────────────────────────────────────────
 export const CheckoutPage = () => {
   const { user } = useAuth();
@@ -59,6 +63,7 @@ export const CheckoutPage = () => {
   const book = useResource<Address[] | null>(loadAddresses, null, userId);
   const [addressId, setAddressId] = useState<string | null>(null);
   const [telephone, setTelephone] = useState(user?.telephone ?? "");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.ON_DELIVERY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,14 +128,24 @@ export const CheckoutPage = () => {
         ),
         addressId: homeDelivery ? (selectedId ?? undefined) : undefined,
         telephone: pickupOnly && telephone.trim() ? telephone.trim() : undefined,
+        paymentMethod,
       });
       // La page part avant que le panier, vidé par le serveur, ne soit relu :
       // sinon elle afficherait un instant « panier vide ».
-      navigate(`/compte/commandes/${encodeURIComponent(order.id)}`, {
-        state: {
-          feedback: `Commande ${order.reference} enregistrée. Vous pouvez suivre sa préparation ici.`,
-        } satisfies OrderDetailState,
-      });
+      if (order.payment?.redirectUrl) {
+        const destination = paymentDestination(order.payment.redirectUrl);
+        if ("external" in destination) {
+          window.location.assign(destination.external);
+          return;
+        }
+        navigate(destination.internal);
+      } else {
+        navigate(`/compte/commandes/${encodeURIComponent(order.id)}`, {
+          state: {
+            feedback: `Commande ${order.reference} enregistrée et transmise aux boutiques. Vous pouvez suivre chaque livraison ici.`,
+          } satisfies OrderDetailState,
+        });
+      }
       setDeliverySelection({});
       void refresh();
     } catch (caught) {
@@ -238,6 +253,35 @@ export const CheckoutPage = () => {
               </>
             )}
           </section>
+
+          <section className={styles.step} aria-labelledby="checkout-payment">
+            <h2 id="checkout-payment" className={styles.stepTitle}>
+              <span className={styles.stepIndex} aria-hidden="true">03</span>
+              Paiement
+            </h2>
+            <Choices
+              legend="Mode de paiement"
+              options={[
+                {
+                  value: PaymentMethod.ON_DELIVERY,
+                  label: PAYMENT_METHOD_LABELS.on_delivery,
+                  hint: "Vous réglez chaque boutique à la remise de sa commande, sur présentation de votre code de remise.",
+                },
+                {
+                  value: PaymentMethod.ONLINE,
+                  label: PAYMENT_METHOD_LABELS.online,
+                  hint: "Réglez tout maintenant, en une fois. Les boutiques reçoivent la commande dès le paiement confirmé ; vous avez 30 minutes pour payer.",
+                },
+              ]}
+              value={paymentMethod}
+              onChange={(value) => setPaymentMethod(value as PaymentMethod)}
+              disabled={submitting}
+            />
+            <p className={styles.stepText}>
+              Une boutique qui refuse ou ne confirme pas sa part sous 48 heures ne la livre pas : payée en ligne, elle
+              vous est remboursée.
+            </p>
+          </section>
         </div>
 
         <aside className={styles.summary} aria-labelledby="checkout-summary">
@@ -287,7 +331,7 @@ export const CheckoutPage = () => {
 
           <div className={styles.actions}>
             <Button fullWidth onClick={() => void confirm()} disabled={!canSubmit} isLoading={submitting}>
-              Confirmer la commande
+              {paymentMethod === PaymentMethod.ONLINE ? "Commander et payer" : "Confirmer la commande"}
             </Button>
           </div>
 

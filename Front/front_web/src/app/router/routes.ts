@@ -14,21 +14,27 @@ export const ROUTES = {
   // Ouverture d'une boutique : questionnaire, puis suivi de la demande.
   accountShopRequest: "/compte/boutique",
   accountShopRequestNew: "/compte/boutique/demande",
-  // Espace vendeur : une boutique, ses produits et ses modes de livraison.
+  // Espace vendeur : une boutique, ses commandes, ses produits et ses modes de livraison.
   seller: "/ma-boutique",
   sellerShop: "/ma-boutique/:boutiqueId",
+  sellerOrders: "/ma-boutique/:boutiqueId/commandes",
+  sellerOrder: "/ma-boutique/:boutiqueId/commandes/:partId",
   sellerProducts: "/ma-boutique/:boutiqueId/produits",
   sellerProductNew: "/ma-boutique/:boutiqueId/produits/nouveau",
   sellerProductEdit: "/ma-boutique/:boutiqueId/produits/:offreId/modifier",
   sellerDelivery: "/ma-boutique/:boutiqueId/livraison",
   sellerInfo: "/ma-boutique/:boutiqueId/informations",
-  // Administration : examen des demandes d'ouverture de boutique.
+  // Administration : demandes d'ouverture de boutique, commandes et litiges.
   admin: "/admin",
   adminShopRequests: "/admin/demandes-boutique",
   adminShopRequest: "/admin/demandes-boutique/:requestId",
+  adminOrders: "/admin/commandes",
+  adminOrder: "/admin/commandes/:partId",
   panier: "/panier",
-  // Tunnel de commande : livraison par boutique, adresse, confirmation.
+  // Tunnel de commande : livraison par boutique, adresse, paiement, confirmation.
   commande: "/commande",
+  // Page du prestataire de paiement simulé (paiement en ligne).
+  paiement: "/paiement/:orderId",
   favoris: "/favoris",
   recherche: "/recherche",
   nouveautes: "/nouveautes",

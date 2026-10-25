@@ -1,34 +1,41 @@
 import { useCallback, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  deliveryMethodLabel,
-  DeliveryMethod,
+  DeliveryMode,
+  formatFee,
+} from "../../../../entities/delivery";
+import {
+  ORDER_PAYMENT_LABELS,
   OrderStatus,
+  PAYMENT_METHOD_LABELS,
+  PaymentMethod,
   type Order,
-  type OrderItem,
+  type ShopOrder,
 } from "../../../../entities/order";
-import { DeliveryMode, formatFee } from "../../../../entities/delivery";
 import { formatPrice } from "../../../../entities/product";
-import { Alert, Button, Thumbnail } from "../../../../shared/ui";
+import { Alert, Button } from "../../../../shared/ui";
 import { useDocumentTitle } from "../../../../shared/hooks/useDocumentTitle";
 import { useResource } from "../../../catalog";
 import { useCart } from "../../../cart";
 import {
+  fetchOrder,
+  formatDeadline,
+  paymentDestination,
+  restartPayment,
+  ShopOrderPanel,
+  timeLeft,
+} from "../../../orders";
+import {
   AccountHeader,
   AccountPage,
   AccountPanel,
-  fetchOrder,
   formatDate,
   OrderStatusBadge,
   shortReference,
 } from "../../shared";
-import { OrderTimeline } from "../components/OrderTimeline";
 import styles from "./OrderDetailPage.module.css";
 
 const ORDERS_CRUMB = { label: "Mes commandes", to: "/compte/commandes" };
-
-const itemName = (item: OrderItem): string =>
-  item.product?.name ?? item.productBoutique?.product?.name ?? "Article retiré du catalogue";
 
 /** Message passé par la page de commande, affiché à l'arrivée. */
 export interface OrderDetailState {
@@ -41,37 +48,42 @@ const reorderable = (order: Order) =>
 
 // ─────────────────────────────────────────────
 //  Détail d'une commande — /compte/commandes/:orderId
-//  Suivi (étapes datées), articles au prix figé, récapitulatif des montants
-//  et livraison. Le client ne peut pas annuler lui-même : le back réserve
-//  le changement de statut au dépôt et à l'administrateur.
+//
+//  Une commande se découpe en une sous-commande par boutique : chacune a son
+//  statut, son code de remise, ses délais et ses actions (annuler tant que
+//  la boutique n'a pas expédié, demander un retour après la livraison). Le
+//  statut global se déduit des parties. En colonne : les montants, le
+//  paiement et l'adresse.
 // ─────────────────────────────────────────────
 export const OrderDetailPage = () => {
   const { orderId = "" } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
-  const feedback = (useLocation().state as OrderDetailState | null)?.feedback;
+  const arrival = (useLocation().state as OrderDetailState | null)?.feedback ?? null;
   const { add } = useCart();
   const [reordering, setReordering] = useState(false);
-  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(arrival);
+  // Une action relit la commande : son statut global peut avoir changé. Les
+  // données affichées restent en place pendant la relecture.
+  const [version, setVersion] = useState(0);
 
   const load = useCallback((signal: AbortSignal) => fetchOrder(orderId, signal), [orderId]);
-  const order = useResource<Order | null>(load, null, orderId);
-  const data = order.data;
+  const order = useResource<Order | null>(load, null, `${orderId}:${version}`);
+  const data = order.data?.id === orderId ? order.data : null;
 
   useDocumentTitle(data ? `Commande ${shortReference(data.reference)}` : "Commande");
 
-  if (order.error) {
+  if (order.error && !data) {
     return (
       <AccountPage>
-        <AccountHeader
-          title="Commande introuvable"
-          trail={[ORDERS_CRUMB, { label: "Introuvable" }]}
-        />
+        <AccountHeader title="Commande introuvable" trail={[ORDERS_CRUMB, { label: "Introuvable" }]} />
         <Alert tone="danger">{order.error}</Alert>
       </AccountPage>
     );
   }
 
-  if (order.isLoading || !data) {
+  if (!data) {
     return (
       <AccountPage>
         <AccountHeader title="Commande…" trail={[ORDERS_CRUMB, { label: "…" }]} />
@@ -86,7 +98,7 @@ export const OrderDetailPage = () => {
   // la limite du stock, puis emmène au panier pour vérifier avant de payer.
   const reorder = async () => {
     setReordering(true);
-    setReorderError(null);
+    setError(null);
     try {
       for (const item of available) {
         const offer = item.productBoutique;
@@ -94,33 +106,47 @@ export const OrderDetailPage = () => {
       }
       navigate("/panier");
     } catch (caught) {
-      setReorderError((caught as Error).message);
+      setError((caught as Error).message);
       setReordering(false);
     }
   };
 
-  const address = data.shippingAddress;
-  const pickupShops = [
-    ...new Map(
-      data.items.filter((item) => item.boutique).map((item) => [item.boutique!.id, item.boutique!])
-    ).values(),
-  ];
+  const pay = async () => {
+    setPaying(true);
+    setError(null);
+    try {
+      const { redirectUrl } = await restartPayment(data.id);
+      if (!redirectUrl) throw new Error("Le prestataire de paiement n'a pas répondu.");
+      const destination = paymentDestination(redirectUrl);
+      if ("external" in destination) window.location.assign(destination.external);
+      else navigate(destination.internal);
+    } catch (caught) {
+      setError((caught as Error).message);
+      setPaying(false);
+      setVersion((value) => value + 1);
+    }
+  };
 
-  // Une livraison par boutique, figée au checkout. Les commandes d'avant les
-  // modes par boutique n'en ont pas : elles gardent leur mode unique.
-  const deliveries = data.deliveries ?? [];
-  const delivered = deliveries.some((delivery) => delivery.method !== DeliveryMode.PICKUP);
-  const shippingLabel =
-    deliveries.length > 1 ? "Livraison" : deliveryMethodLabel(data.deliveryMethod);
+  const onPartUpdated = (_part: ShopOrder, message: string) => {
+    setFeedback(message);
+    setError(null);
+    setVersion((value) => value + 1);
+  };
+
+  const address = data.shippingAddress;
+  const delivered = data.parts.some((part) => part.delivery.method !== DeliveryMode.PICKUP);
+  const awaitingPayment = data.status === OrderStatus.AWAITING_PAYMENT;
 
   return (
     <AccountPage>
       <AccountHeader
         title={`Commande ${shortReference(data.reference)}`}
-        lede={`Passée le ${formatDate(data.createdAt)} · ${data.totalItems} article${data.totalItems > 1 ? "s" : ""}`}
+        lede={`Passée le ${formatDate(data.createdAt)} · ${data.totalItems} article${data.totalItems > 1 ? "s" : ""}${
+          data.parts.length > 1 ? ` · ${data.parts.length} boutiques` : ""
+        }`}
         trail={[ORDERS_CRUMB, { label: `Commande ${shortReference(data.reference)}` }]}
         action={
-          available.length > 0 ? (
+          available.length > 0 && !awaitingPayment ? (
             <Button variant="secondary" onClick={() => void reorder()} isLoading={reordering}>
               Commander à nouveau
             </Button>
@@ -134,53 +160,55 @@ export const OrderDetailPage = () => {
         </div>
       ) : null}
 
-      {reorderError ? (
+      {error ? (
         <div className={styles.alert}>
-          <Alert tone="danger">{reorderError}</Alert>
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      ) : null}
+
+      {awaitingPayment ? (
+        <div className={styles.paymentDue}>
+          <p>
+            <strong>Paiement en attente.</strong>{" "}
+            {data.paymentExpiresAt
+              ? `À régler avant le ${formatDeadline(data.paymentExpiresAt)} (${timeLeft(data.paymentExpiresAt)}). `
+              : ""}
+            Sans paiement, la commande est annulée et ses articles reviennent dans votre panier.
+          </p>
+          <Button onClick={() => void pay()} isLoading={paying}>
+            Payer {formatPrice(data.amount)}
+          </Button>
+        </div>
+      ) : data.status === OrderStatus.PAYMENT_FAILED ? (
+        <div className={styles.alert}>
+          <Alert tone="warning">
+            Le paiement n'a pas abouti : la commande est annulée et ses articles sont revenus dans votre panier.{" "}
+            <Link to="/panier">Voir mon panier</Link>
+          </Alert>
         </div>
       ) : null}
 
       <div className={styles.layout}>
         <div className={styles.main}>
-          <AccountPanel title="Articles">
-            <ul className={styles.items}>
-              {data.items.map((item, index) => {
-                const offer = item.productBoutique;
-                return (
-                  <li key={`${offer?.id ?? "retire"}-${index}`} className={styles.item}>
-                    <span className={styles.thumb}>
-                      <Thumbnail
-                        src={offer?.urlImages[0] ?? item.product?.urlImages[0]}
-                        alt=""
-                        seed={offer?.id ?? String(index)}
-                      />
-                    </span>
-                    <div className={styles.itemBody}>
-                      {offer ? (
-                        <Link className={styles.itemName} to={`/produits/${offer.id}`}>
-                          {itemName(item)}
-                        </Link>
-                      ) : (
-                        <span className={styles.itemName}>{itemName(item)}</span>
-                      )}
-                      {item.boutique ? (
-                        <Link className={styles.itemShop} to={`/boutiques/${item.boutique.id}`}>
-                          {item.boutique.nom}
-                        </Link>
-                      ) : null}
-                      <span className={styles.itemQty}>
-                        {item.quantity} × {formatPrice(item.price)}
-                      </span>
-                    </div>
-                    <span className={styles.itemTotal}>{formatPrice(item.lineTotal)}</span>
-                  </li>
-                );
-              })}
-            </ul>
+          {data.parts.map((part) => (
+            <ShopOrderPanel
+              key={part.id}
+              part={part}
+              viewer="client"
+              title={<Link to={`/boutiques/${part.boutique.id}`}>{part.boutique.nom ?? "Boutique"}</Link>}
+              onUpdated={onPartUpdated}
+            />
+          ))}
+        </div>
 
+        <div className={styles.side}>
+          <AccountPanel title="Récapitulatif">
+            <div className={styles.status}>
+              <OrderStatusBadge status={data.status} />
+            </div>
             <dl className={styles.totals}>
               <div className={styles.totalRow}>
-                <dt>Sous-total</dt>
+                <dt>Articles</dt>
                 <dd>{formatPrice(data.subtotal)}</dd>
               </div>
               {data.discountAmount > 0 ? (
@@ -190,98 +218,55 @@ export const OrderDetailPage = () => {
                 </div>
               ) : null}
               <div className={styles.totalRow}>
-                <dt>{shippingLabel}</dt>
+                <dt>Livraison</dt>
                 <dd>{formatFee(data.shippingFee)}</dd>
               </div>
               <div className={[styles.totalRow, styles.grand].join(" ")}>
-                {/* « Total » et non « payé » : le back ne connaît pas l'état du
-                    paiement, et une commande annulée n'a rien coûté. */}
                 <dt>Total</dt>
                 <dd>{formatPrice(data.amount)}</dd>
               </div>
+              <div className={styles.totalRow}>
+                <dt>Paiement</dt>
+                {/* Payée à la remise, chaque boutique encaisse sa part : son
+                    état se lit dans son bloc. En ligne, le paiement est unique. */}
+                <dd>
+                  {PAYMENT_METHOD_LABELS[data.paymentMethod]}
+                  {data.paymentMethod === PaymentMethod.ONLINE ? ` · ${ORDER_PAYMENT_LABELS[data.paymentStatus]}` : ""}
+                </dd>
+              </div>
             </dl>
           </AccountPanel>
-        </div>
 
-        <div className={styles.side}>
-          <AccountPanel title="Suivi">
-            <div className={styles.status}>
-              <OrderStatusBadge status={data.status} />
-            </div>
-            <OrderTimeline order={data} />
-          </AccountPanel>
-
-          <AccountPanel title="Livraison">
-            {deliveries.length > 0 ? (
-              <>
-                {/* Modes et frais tels qu'ils ont été facturés : ils ne suivent
-                    pas les réglages actuels des boutiques. */}
-                <ul className={styles.deliveries}>
-                  {deliveries.map((delivery) => (
-                    <li key={delivery.boutiqueId} className={styles.delivery}>
-                      <div className={styles.deliveryHead}>
-                        <Link to={`/boutiques/${delivery.boutiqueId}`}>
-                          {delivery.boutiqueNom ?? "Boutique"}
-                        </Link>
-                        <span className={styles.deliveryFee}>{formatFee(delivery.fee)}</span>
-                      </div>
-                      <span className={styles.method}>{deliveryMethodLabel(delivery.method)}</span>
-                      {delivery.method === DeliveryMode.PICKUP ? (
-                        <span className={styles.muted}>
-                          À retirer : {delivery.pickupAdresse ?? "adresse de la boutique"}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-                {delivered ? (
-                  address ? (
-                    <address className={styles.address}>
-                      {address.destinataire ? <span>{address.destinataire}</span> : null}
-                      <span>{address.adresse}</span>
-                      <span>{[address.commune, address.ville].filter(Boolean).join(", ")}</span>
-                      {address.pays !== "Guinée" ? <span>{address.pays}</span> : null}
-                      <span className={styles.contact}>Joignable au {address.telephone}</span>
-                    </address>
-                  ) : (
-                    <p className={styles.muted}>Adresse non renseignée.</p>
-                  )
-                ) : null}
-              </>
+          <AccountPanel title={delivered ? "Adresse de livraison" : "Retrait en boutique"}>
+            {delivered ? (
+              address ? (
+                <address className={styles.address}>
+                  {address.destinataire ? <span>{address.destinataire}</span> : null}
+                  <span>{address.adresse}</span>
+                  <span>{[address.commune, address.ville].filter(Boolean).join(", ")}</span>
+                  {address.pays !== "Guinée" ? <span>{address.pays}</span> : null}
+                  <span className={styles.contact}>Joignable au {address.telephone}</span>
+                </address>
+              ) : (
+                <p className={styles.muted}>Adresse non renseignée.</p>
+              )
             ) : (
-              <p className={styles.method}>{deliveryMethodLabel(data.deliveryMethod)}</p>
+              <ul className={styles.pickupList}>
+                {data.parts.map((part) => (
+                  <li key={part.id}>
+                    <strong>{part.boutique.nom ?? "Boutique"}</strong>
+                    {part.delivery.pickupAdresse ? ` — ${part.delivery.pickupAdresse}` : ""}
+                  </li>
+                ))}
+              </ul>
             )}
-            {deliveries.length > 0 ? null : data.deliveryMethod === DeliveryMethod.PICKUP ? (
-              <div className={styles.pickup}>
-                <p>À retirer au dépôt :</p>
-                <ul>
-                  {pickupShops.map((shop) => (
-                    <li key={shop.id}>
-                      <Link to={`/boutiques/${shop.id}`}>{shop.nom}</Link>
-                      {shop.adresse ? <span> — {shop.adresse}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : address ? (
-              <address className={styles.address}>
-                {address.destinataire ? <span>{address.destinataire}</span> : null}
-                <span>{address.adresse}</span>
-                <span>{[address.commune, address.ville].filter(Boolean).join(", ")}</span>
-                {address.pays !== "Guinée" ? <span>{address.pays}</span> : null}
-                <span className={styles.contact}>Joignable au {address.telephone}</span>
-              </address>
-            ) : (
-              <p className={styles.muted}>Adresse non renseignée.</p>
-            )}
-            {data.status === OrderStatus.CANCELLED ? (
-              <p className={styles.muted}>Cette commande a été annulée : rien ne sera livré.</p>
-            ) : null}
           </AccountPanel>
 
           <AccountPanel title="Référence">
             <p className={styles.reference}>{data.reference}</p>
-            <p className={styles.muted}>À communiquer au dépôt pour toute question.</p>
+            <p className={styles.muted}>
+              Chaque boutique a sa propre référence (suffixe -1, -2…) : donnez-la-lui pour toute question.
+            </p>
           </AccountPanel>
         </div>
       </div>

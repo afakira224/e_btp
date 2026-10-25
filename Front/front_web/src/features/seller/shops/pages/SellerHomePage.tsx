@@ -27,7 +27,7 @@ export const SellerHomePage = () => {
   const header = (
     <SellerHeader
       title="Ma boutique"
-      lede="Gérez les produits, les modes de livraison et les informations de vos boutiques."
+      lede="Suivez les commandes, gérez les produits, les modes de livraison et les informations de vos boutiques."
     />
   );
 
@@ -51,7 +51,7 @@ export const SellerHomePage = () => {
 
   const [only] = shops.data;
   if (shops.data.length === 1 && only) {
-    return <Navigate to={sellerPaths.products(only.id)} replace />;
+    return <Navigate to={sellerPaths.orders(only.id)} replace />;
   }
 
   return (
@@ -67,7 +67,7 @@ export const SellerHomePage = () => {
         <ul className={styles.shops}>
           {shops.data.map((shop) => (
             <li key={shop.id}>
-              <Link className={styles.card} to={sellerPaths.products(shop.id)}>
+              <Link className={styles.card} to={sellerPaths.orders(shop.id)}>
                 <span className={styles.name}>
                   {shop.nom}
                   <span aria-hidden="true">→</span>

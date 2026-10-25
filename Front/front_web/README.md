@@ -60,7 +60,11 @@ Le mock ne route que ce que le back monte, avec les mêmes paramètres :
 | `GET /products?search=` | Fiches du catalogue, pour créer une offre |
 | `POST /product-boutiques` · `PUT /product-boutiques/:id` | Création et modification d'une offre (multipart) |
 | `POST /cart/:userId/delivery-quote` | Modes et frais de livraison du panier |
-| `POST /orders/:userId` | Checkout : un mode par boutique, adresse du carnet |
+| `POST /orders/:userId` | Checkout : un mode par boutique, adresse du carnet, mode de paiement |
+| `GET /orders?status=` · `GET /orders/:id` | Mes commandes, avec leurs sous-commandes |
+| `GET /shop-orders?boutiqueId=&group=&search=&page=` · `GET /shop-orders/:id` | Commandes d'une boutique (ou de toutes, pour l'administration), onglets et leurs comptes |
+| `PATCH /shop-orders/:id/:action` | Les actions du cycle de vie (JSON, ou multipart avec photos pour un retour) |
+| `POST /payments/:orderId` · `POST /payments/sandbox/:orderId` | Relance d'un paiement en ligne, issue du paiement simulé |
 | `PUT /shops/:id` | Informations de la boutique et logo (multipart, espace vendeur) |
 | `POST /shop-requests` · `GET /shop-requests/mine` · `PATCH /shop-requests/:id/cancel` | Demande d'ouverture de boutique, suivi, retrait |
 | `GET /shop-requests?status=&search=&page=&limit=` · `GET /shop-requests/:id` | File d'examen de l'administration |
@@ -115,7 +119,10 @@ Un second compte, `aissatou@btp.com`, est volontairement **non vérifié** pour
 éprouver le refus 403.
 
 Le compte vendeur `gerant.volta-electrique@btp.com` (même mot de passe) gère la
-boutique Volta Électrique et ouvre l'espace « Ma boutique ». Avec le vrai back,
+boutique Volta Électrique et ouvre l'espace « Ma boutique ». Les commandes de
+démonstration de `mamadou@btp.com` lui laissent une commande dans presque chaque
+onglet (à confirmer, en préparation, livrée, retour demandé, terminée), et
+l'administration y trouve un litige à trancher. Avec le vrai back,
 `npm run seed` crée un gérant par boutique sur le même modèle
 (`gerant.<boutique>@btp.com`).
 
@@ -132,8 +139,12 @@ de suivre le parcours depuis le début.
 En mode simulé, le catalogue de départ est figé dans `catalogSeed.ts` ; ce
 qu'en font les vendeurs (réglages de livraison, prix, stock, offres ajoutées)
 est rangé dans la base simulée et appliqué à la lecture par `liveCatalog.ts`.
-Les règles de livraison (`deliveryRules.ts`) sont un portage de celles du back,
-messages compris. Les photos ajoutées en mode simulé sont des URL d'objet : elles
+Les règles de livraison (`deliveryRules.ts`) et celles du cycle de vie des
+commandes (`shopOrderRules.ts`) sont des portages de celles du back, messages
+compris. Les délais automatiques (expiration, clôture, litige) que le serveur
+applique toutes les 15 minutes s'appliquent ici à chaque lecture, à la date de
+leur échéance. Une base enregistrée avant les sous-commandes reçoit les siennes
+à la lecture (`legacyOrders.ts`), comme avec `npm run migrate:shop-orders`. Les photos ajoutées en mode simulé sont des URL d'objet : elles
 ne survivent pas à un rechargement.
 
 Aucun email ne part : les liens de vérification et de réinitialisation sont
@@ -186,12 +197,16 @@ toujours vers `/` écrasait la page demandée.
 | `/sous-categories/:sousCategorieId` | Produits d'une sous-catégorie | Ouvert |
 | `/produits/:offreId` | Fiche produit | Ouvert |
 | `/panier` | Panier | Authentifié |
-| `/commande` | Tunnel de commande : livraison par boutique, adresse, confirmation | Authentifié |
+| `/commande` | Tunnel de commande : livraison par boutique, adresse, paiement | Authentifié |
+| `/paiement/:orderId` | Page du prestataire de paiement simulé | Authentifié |
+| `/compte/commandes` · `/compte/commandes/:orderId` | Mes commandes ; détail boutique par boutique, avec code de remise, annulation et retour | Authentifié |
 | `/favoris` | Favoris | Authentifié |
 | `/compte` | Espace compte | Authentifié |
 | `/compte/boutique/demande` | Questionnaire d'ouverture de boutique | Authentifié |
 | `/compte/boutique` | Suivi de la demande : issue, réponses, historique | Authentifié |
 | `/ma-boutique` | Espace vendeur : choix de la boutique (entrée directe s'il n'y en a qu'une) | Boutique, admin |
+| `/ma-boutique/:boutiqueId/commandes` | Commandes de la boutique, par onglet (à confirmer, en préparation…) | Boutique, admin |
+| `/ma-boutique/:boutiqueId/commandes/:partId` | Une commande : confirmer, expédier, remettre, répondre à un retour | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits` | Produits de la boutique et provenance de leur livraison | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits/nouveau` | Mise en vente d'un produit du catalogue | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits/:offreId/modifier` | Modification d'un produit | Boutique, admin |
@@ -199,6 +214,7 @@ toujours vers `/` écrasait la page demandée.
 | `/ma-boutique/:boutiqueId/informations` | Nom, présentation, email, adresse et logo de la boutique | Boutique, admin |
 | `/admin/demandes-boutique` | File des demandes d'ouverture, par statut | Admin |
 | `/admin/demandes-boutique/:requestId` | Examen d'une demande : approuver ou refuser | Admin |
+| `/admin/commandes` · `/admin/commandes/:partId` | Commandes de toutes les boutiques, problèmes d'abord ; trancher un litige | Admin |
 
 L'accueil est délibérément public : une vitrine derrière un mur
 d'authentification empêche de découvrir le catalogue avant de s'inscrire.
@@ -391,7 +407,7 @@ retrouve sur la page de commande, et un changement de compte l'efface.
 
 #### Tunnel de commande
 
-`/commande`, sur une seule page, en deux étapes puis une confirmation :
+`/commande`, sur une seule page, en trois étapes puis une confirmation :
 
 1. **Livraison** — le même choix par boutique que le panier.
 2. **Adresse** — dès qu'une boutique livre, une adresse du carnet est requise ;
@@ -400,18 +416,48 @@ retrouve sur la page de commande, et un changement de compte l'efface.
    chemins internes seulement). Si tout est retiré en boutique, aucune adresse
    n'est demandée : la page liste les adresses de retrait et propose un
    téléphone de contact, prérempli depuis le profil.
+3. **Paiement** — à la livraison ou au retrait (par défaut : chaque boutique
+   encaisse sa part à la remise), ou en ligne (tout, maintenant).
 
 « Confirmer la commande » n'est actif que si le devis est complet, le stock
 suffisant et l'adresse choisie quand elle est requise. Le front envoie à
-`POST /orders/:userId` les modes (`deliveries`), l'adresse (`addressId`) et
-le téléphone éventuel — **aucun montant**. Le serveur recalcule tout dans sa
-transaction ; s'il refuse (mode retiré entre-temps, stock épuisé), l'erreur
-s'affiche et le devis comme le panier sont relus. En cas de succès, le client
-arrive sur le détail de la commande, qui affiche les livraisons figées, et le
-panier, vidé par le serveur, est relu.
+`POST /orders/:userId` les modes (`deliveries`), l'adresse (`addressId`), le
+téléphone éventuel et le mode de paiement — **aucun montant**. Le serveur
+recalcule tout dans sa transaction ; s'il refuse (mode retiré entre-temps,
+stock épuisé), l'erreur s'affiche et le devis comme le panier sont relus.
+
+- **À la livraison** : le client arrive sur le détail de la commande, déjà
+  transmise aux boutiques.
+- **En ligne** : le client part sur la page du prestataire (`payment.redirectUrl`
+  dans la réponse ; une adresse du site s'ouvre sans recharger l'application).
+  Le prestataire simulé (`/paiement/:orderId`) propose « Payer » ou « Simuler un
+  refus ». Payée, la commande part chez les boutiques ; refusée, ou sans
+  paiement sous 30 minutes, elle est annulée et ses articles reviennent dans le
+  panier. Une commande en attente se paie aussi depuis son détail.
 
 Les coupons ne sont pas proposés dans le tunnel : le back les accepte (`code`),
 le mode simulé ne les porte pas.
+
+## Cycle de vie des commandes
+
+Une commande est découpée en **une sous-commande par boutique**, chacune avec
+son statut, ses délais, son code de remise et ses actions. Les règles vivent au
+back (`shopOrder.workflow.ts`) ; le front n'affiche que les boutons que le
+serveur renvoie dans `availableActions`, et chaque action ouvre sur place le
+formulaire qu'elle demande (motif, code, photos, décision). Tout est dans la
+feature `orders`, partagée par les trois places qui lisent une commande :
+
+| Qui | Où | Ce qu'il fait |
+| --- | --- | --- |
+| Client | `/compte/commandes/:orderId` | Suit chaque boutique ; annule avant l'expédition ; donne son **code de remise** (affiché dès que le colis part ou est prêt) ; demande un retour dans les 7 jours (photo exigée pour un produit abîmé) |
+| Boutique | `/ma-boutique/:id/commandes` | Onglets à confirmer · en préparation · en livraison · livrées · problèmes · terminées, avec leur compte et l'échéance de chaque commande ; confirme ou refuse (motif), expédie ou met à disposition, remet avec le code du client, signale un échec puis relivre (2 tentatives) ou abandonne, accepte ou refuse un retour, confirme un remboursement |
+| Administration | `/admin/commandes` | Toutes les boutiques, l'onglet « Problèmes » d'abord ; tranche un litige (remboursement total, partiel ou rejet), confirme un remboursement, annule d'office |
+
+Chaque attente a son échéance, annoncée avec ce qui arrive si personne ne fait
+rien : 48 h pour confirmer (sinon expirée), 7 jours pour retirer, 7 jours pour
+demander un retour (puis terminée), 48 h pour répondre à un retour (sinon
+litige). Les montants remboursés suivent la règle du back : tout, sauf les frais
+de livraison quand le client a causé l'échec de livraison.
 
 ## Ouverture d'une boutique
 
@@ -530,6 +576,7 @@ src/
 │   ├── user/
 │   ├── product/            Product, ProductBoutique, CatalogItem, règles de prix
 │   ├── delivery/           Modes de livraison, réglages, devis du panier
+│   ├── order/              Commande, sous-commande : statuts, actions, motifs
 │   ├── taxonomy/           Famille, Categorie, SousCategorie
 │   └── promotion/          Promotion, compte à rebours
 ├── features/
@@ -548,10 +595,13 @@ src/
 │   │   ├── domains/        Menu « Domaine » de la navigation
 │   │   ├── product/        Fiche produit
 │   │   └── browse/         Pages familles / catégorie / sous-catégorie
-│   ├── cart/               Panier, choix de livraison par boutique, tunnel de commande
+│   ├── cart/               Panier, choix de livraison par boutique, tunnel de commande, page de paiement
+│   ├── orders/             Cycle de vie des commandes, partagé par le compte, la boutique et l'administration
+│   │   └── shared/         API, bloc d'une sous-commande, actions, historique, tableau à onglets
 │   ├── seller/             Espace « Ma boutique »
 │   │   ├── shared/         API, garde, ossature, éditeur des modes, règles
 │   │   ├── shops/          Choix de la boutique
+│   │   ├── orders/         Commandes de la boutique
 │   │   ├── delivery/       Livraison par défaut de la boutique
 │   │   ├── products/       Liste, création et modification d'un produit
 │   │   └── settings/       Informations et logo de la boutique
@@ -561,7 +611,8 @@ src/
 │   │   └── status/         Suivi de la demande, panneau du profil
 │   ├── admin/              Administration
 │   │   ├── shared/         API, garde, en-tête, paths
-│   │   └── shop-requests/  File et examen des demandes de boutique
+│   │   ├── shop-requests/  File et examen des demandes de boutique
+│   │   └── orders/         Commandes de toutes les boutiques, litiges
 │   └── home/
 │       ├── shared/         Section (en-tête, chargement, erreur)
 │       ├── hero/           Carrousel : model · hooks · components

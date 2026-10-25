@@ -1,5 +1,10 @@
 import { Link } from "react-router-dom";
-import { deliveryMethodLabel, type Order } from "../../../../entities/order";
+import {
+  deliveryMethodLabel,
+  SHOP_ORDER_STATUS_LABELS,
+  SHOP_ORDER_STATUS_TONES,
+  type Order,
+} from "../../../../entities/order";
 import { formatPrice } from "../../../../entities/product";
 import { Thumbnail } from "../../../../shared/ui";
 import { formatDate, shortReference } from "../utils/format";
@@ -31,6 +36,21 @@ export const OrderCard = ({ order }: { order: Order }) => {
         </div>
         <OrderStatusBadge status={order.status} />
       </div>
+
+      {/* Où en est chaque boutique : une commande « en cours » peut être déjà
+          livrée chez l'une et en préparation chez l'autre. */}
+      {order.parts.length > 0 ? (
+        <ul className={styles.parts}>
+          {order.parts.map((part) => (
+            <li key={part.id} className={styles.part}>
+              <span className={styles.partShop}>{part.boutique.nom ?? "Boutique"}</span>
+              <span className={[styles.partStatus, styles[SHOP_ORDER_STATUS_TONES[part.status]]].join(" ")}>
+                {SHOP_ORDER_STATUS_LABELS[part.status]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className={styles.bottom}>
         <div className={styles.thumbs} aria-hidden="true">

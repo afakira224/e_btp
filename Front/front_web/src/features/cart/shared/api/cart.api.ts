@@ -2,7 +2,7 @@ import { apiClient } from "../../../../shared/api";
 import { EMPTY_CART, type Cart } from "../../../../entities/cart";
 import type { Address } from "../../../../entities/address";
 import type { DeliveryQuote, DeliverySelection } from "../../../../entities/delivery";
-import type { Order } from "../../../../entities/order";
+import type { Order, PaymentMethod } from "../../../../entities/order";
 
 // ─────────────────────────────────────────────
 //  Panier — cinq routes, toutes portant l'identifiant utilisateur dans
@@ -106,13 +106,18 @@ export interface CheckoutInput {
   addressId?: string | undefined;
   /** Téléphone de contact, utile quand tout est retiré en boutique. */
   telephone?: string | undefined;
+  paymentMethod: PaymentMethod;
 }
 
-export const placeOrder = async (userId: string, input: CheckoutInput): Promise<Order> => {
-  const response = await apiClient.post<Order>(`/orders/${encodeURIComponent(userId)}`, {
+/** Commande payée en ligne : le serveur renvoie aussi la page du prestataire. */
+export type PlacedOrder = Order & { payment?: { redirectUrl: string } | undefined };
+
+export const placeOrder = async (userId: string, input: CheckoutInput): Promise<PlacedOrder> => {
+  const response = await apiClient.post<PlacedOrder>(`/orders/${encodeURIComponent(userId)}`, {
     deliveries: toDeliveries(input.deliveries),
     ...(input.addressId ? { addressId: input.addressId } : {}),
     ...(input.telephone ? { telephone: input.telephone } : {}),
+    paymentMethod: input.paymentMethod,
   });
   if (!response.data) throw new Error("La commande n'a pas été créée.");
   return response.data;

@@ -7,7 +7,8 @@ import {
   SellerType,
   ShopRequestStatus,
 } from "../../../entities/shop-request";
-import { seedAccountFor, type MockAddress, type MockOrder } from "./accountSeed";
+import { seedAccountFor, type MockAddress, type MockOrder, type MockShopOrder } from "./accountSeed";
+import { migrateLegacyOrders } from "./legacyOrders";
 import { SHOPS } from "./catalogSeed";
 
 // ─────────────────────────────────────────────
@@ -142,6 +143,8 @@ export interface MockDb {
   recentlyViewed: MockRecentlyViewed[];
   addresses: MockAddress[];
   orders: MockOrder[];
+  /** Sous-commandes : une par boutique de chaque commande. */
+  shopOrders: MockShopOrder[];
   /** Réglages de livraison enregistrés par les boutiques, par identifiant. */
   shopDeliveries: Record<string, MockShopDelivery>;
   /** Modifications des offres du catalogue de départ, par identifiant. */
@@ -358,7 +361,7 @@ const seed = (): MockDb => {
 
   // Le compte de démonstration arrive avec un historique : un espace client
   // vide ne montre rien de ce qu'il sait faire.
-  const demo = seedAccountFor(verifiedId);
+  const demo = seedAccountFor(verifiedId, users[0]);
 
   return withDemoAccounts({
     users,
@@ -368,6 +371,7 @@ const seed = (): MockDb => {
     recentlyViewed: [],
     addresses: demo.addresses,
     orders: demo.orders,
+    shopOrders: demo.shopOrders,
     shopDeliveries: {},
     offerPatches: {},
     offers: [],
@@ -384,8 +388,8 @@ const withAccountData = (db: MockDb, hadAccountData: boolean): MockDb => {
   if (hadAccountData) return db;
   const demoUser = db.users.find((user) => user.email === DEMO_EMAIL);
   if (!demoUser) return db;
-  const demo = seedAccountFor(demoUser._id);
-  return { ...db, addresses: demo.addresses, orders: demo.orders };
+  const demo = seedAccountFor(demoUser._id, demoUser);
+  return { ...db, addresses: demo.addresses, orders: demo.orders, shopOrders: demo.shopOrders };
 };
 
 // ─────────────────────────────────────────────
@@ -406,7 +410,8 @@ export const readDb = (): MockDb => {
       // Une base écrite avant l'arrivée du panier, des favoris ou des
       // commandes n'a pas ces champs : on les comble plutôt que de laisser
       // un `undefined` se propager.
-      cache = withDemoAccounts(
+      cache = migrateLegacyOrders(
+        withDemoAccounts(
         withAccountData(
           {
             ...parsed,
@@ -417,6 +422,7 @@ export const readDb = (): MockDb => {
             // Commandes antérieures aux livraisons par boutique : comme sur le
             // vrai back, `deliveries` vaut [] à la lecture.
             orders: (parsed.orders ?? []).map((order) => ({ ...order, deliveries: order.deliveries ?? [] })),
+            shopOrders: parsed.shopOrders ?? [],
             shopDeliveries: parsed.shopDeliveries ?? {},
             offerPatches: parsed.offerPatches ?? {},
             offers: parsed.offers ?? [],
@@ -427,6 +433,7 @@ export const readDb = (): MockDb => {
             otherSessions: parsed.otherSessions ?? 0,
           },
           parsed.orders !== undefined
+        )
         )
       );
       writeDb(cache);

@@ -1,10 +1,17 @@
 import type { ProductBoutique } from "../../../entities/product";
-import { isDeliveryMode } from "../../../entities/delivery";
-import type {
-  DeliveryMethod,
-  OrderDelivery,
+import { DeliveryMode, isDeliveryMode } from "../../../entities/delivery";
+import {
+  OrderPaymentStatus,
   OrderStatus,
-  ShippingAddress,
+  PaymentMethod,
+  SHOP_ORDER_NEGATIVE_END,
+  ShopOrderActor,
+  ShopOrderPaymentStatus,
+  ShopOrderStatus,
+  type DeliveryMethod,
+  type OrderDelivery,
+  type Resolution,
+  type ShippingAddress,
 } from "../../../entities/order";
 import { OFFERS } from "./catalogSeed";
 import {
@@ -16,6 +23,7 @@ import {
   toOrderDeliveries,
   toSettingsDto,
 } from "./deliveryRules";
+import { allocateDiscount, generatePickupCode, orderStatusFrom, scheduleFor } from "./shopOrderRules";
 
 // ─────────────────────────────────────────────
 //  Données de compte simulées : adresses et commandes.
@@ -58,13 +66,70 @@ export interface MockOrder {
   promotionCode: string | null;
   shippingFee: number;
   amount: number;
+  /** Se déduit des sous-commandes (orderStatusFrom). */
   status: OrderStatus;
   statusHistory: { status: OrderStatus; changedAt: string; note?: string }[];
+  paymentMethod: PaymentMethod;
+  paymentStatus: OrderPaymentStatus;
+  paidAt: string | null;
+  paymentExpiresAt: string | null;
+  paymentRef?: string | undefined;
   deliveryMethod: DeliveryMethod;
   /** Une livraison par boutique, figée ; vide sur les commandes d'avant les modes par boutique. */
   deliveries: OrderDelivery[];
   addressId: string | null;
   shippingAddress?: ShippingAddress;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Sous-commande telle que Back/src/models/shopOrder.model.ts la stocke. */
+export interface MockShopOrder {
+  id: string;
+  orderId: string;
+  userId: string;
+  boutiqueId: string;
+  boutiqueNom?: string | undefined;
+  reference: string;
+  items: MockOrderItem[];
+  subtotal: number;
+  discountAmount: number;
+  deliveryFee: number;
+  amount: number;
+  delivery: OrderDelivery;
+  shippingAddress?: ShippingAddress | undefined;
+  customer: { nom: string; prenom: string; telephone?: string | undefined };
+  payment: {
+    method: PaymentMethod;
+    status: ShopOrderPaymentStatus;
+    paidAt: string | null;
+    refundedAmount: number;
+    refundedAt: string | null;
+  };
+  status: ShopOrderStatus;
+  statusHistory: {
+    status: ShopOrderStatus;
+    changedAt: string;
+    actor: ShopOrderActor;
+    changedBy?: string | undefined;
+    reason?: string | undefined;
+    note?: string | undefined;
+  }[];
+  pickupCode: string;
+  deliveryAttempts: number;
+  return: {
+    reason: string;
+    details?: string | undefined;
+    photos: string[];
+    requestedAt: string;
+    shopResponse?: string | undefined;
+    respondedAt: string | null;
+    resolution?: Resolution | undefined;
+    resolutionNote?: string | undefined;
+    resolvedAt: string | null;
+  } | null;
+  deadlineAt: string | null;
+  reminderAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,7 +180,37 @@ const line = (index: number, quantity: number): MockOrderItem => {
   return { productBoutiqueId: offer.id, price: unitPrice(offer), quantity };
 };
 
-export const seedAccountFor = (userId: string) => {
+const DEFAULT_ACTORS: Record<ShopOrderStatus, ShopOrderActor> = {
+  awaiting_payment: ShopOrderActor.CLIENT,
+  pending: ShopOrderActor.CLIENT,
+  confirmed: ShopOrderActor.SHOP,
+  shipped: ShopOrderActor.SHOP,
+  ready_for_pickup: ShopOrderActor.SHOP,
+  delivery_failed: ShopOrderActor.SHOP,
+  delivered: ShopOrderActor.SHOP,
+  return_requested: ShopOrderActor.CLIENT,
+  disputed: ShopOrderActor.SHOP,
+  completed: ShopOrderActor.SYSTEM,
+  cancelled: ShopOrderActor.CLIENT,
+  refused: ShopOrderActor.SHOP,
+  expired: ShopOrderActor.SYSTEM,
+  failed: ShopOrderActor.SHOP,
+  returned: ShopOrderActor.SHOP,
+};
+
+const shopOfOffer = (offerId: string): string | undefined =>
+  OFFERS.find((candidate) => candidate.id === offerId)?.boutique?.id;
+
+export interface SeedCustomer {
+  nom: string;
+  prenom: string;
+  telephone?: string | undefined;
+}
+
+export const seedAccountFor = (
+  userId: string,
+  customer: SeedCustomer = { nom: "Diallo", prenom: "Mamadou", telephone: "620000000" }
+) => {
   const maison: MockAddress = {
     id: `adr-${userId}-maison`,
     userId,
@@ -156,16 +251,21 @@ export const seedAccountFor = (userId: string) => {
     pays: address.pays,
   });
 
+  // Une étape : [statut, il y a combien de jours, précisions].
+  type Step = [ShopOrderStatus, number, { reason?: string; note?: string }?];
+
   const order = (spec: {
     n: number;
     daysAgo: number;
     items: MockOrderItem[];
     method: DeliveryMethod;
     address?: MockAddress;
-    history: [OrderStatus, number][];
+    payment?: PaymentMethod;
+    /** Parcours de chaque boutique, par nom ; « à confirmer » par défaut. */
+    flows: Record<string, Step[]>;
     discount?: number;
     code?: string;
-  }): MockOrder => {
+  }): { order: MockOrder; parts: MockShopOrder[] } => {
     const subtotal = spec.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const discountAmount = spec.discount ?? 0;
     const deliveries = snapshot(spec.items, spec.method);
@@ -175,110 +275,219 @@ export const seedAccountFor = (userId: string) => {
     const shippingFee = isDeliveryMode(spec.method)
       ? deliveries.reduce((sum, d) => sum + d.fee, 0)
       : (LEGACY_FEES[spec.method] ?? 0);
-    const statusHistory = spec.history.map(([status, daysAgo]) => ({
-      status,
-      changedAt: at(daysAgo, 2),
-    }));
-    const last = statusHistory[statusHistory.length - 1];
+    const paymentMethod = spec.payment ?? PaymentMethod.ON_DELIVERY;
+    const id = `cmd-${userId}-${spec.n}`;
+    const reference = `CMD-${Date.parse(at(spec.daysAgo)).toString()}-${100000 + spec.n * 7919}`;
 
+    const groups = deliveries.map((delivery) => ({
+      delivery,
+      items: spec.items.filter((item) => shopOfOffer(item.productBoutiqueId) === delivery.boutiqueId),
+    }));
+    const subtotals = groups.map((group) => group.items.reduce((sum, item) => sum + item.price * item.quantity, 0));
+    const shares = allocateDiscount(subtotals, discountAmount);
+
+    const parts = groups.map((group, index): MockShopOrder => {
+      const steps: Step[] = spec.flows[group.delivery.boutiqueNom ?? ""] ?? [[ShopOrderStatus.PENDING, spec.daysAgo]];
+      const history = steps.map(([status, daysAgo, extra]) => ({
+        status,
+        changedAt: at(daysAgo, 1),
+        actor: DEFAULT_ACTORS[status],
+        ...(extra?.reason ? { reason: extra.reason } : {}),
+        note: extra?.note ?? (status === ShopOrderStatus.PENDING ? "Commande passée" : undefined),
+      }));
+      const last = history[history.length - 1]!;
+      const timeOf = (status: ShopOrderStatus) => history.find((entry) => entry.status === status)?.changedAt;
+      const delivered = timeOf(ShopOrderStatus.DELIVERED) ?? null;
+      const negative = SHOP_ORDER_NEGATIVE_END.includes(last.status);
+      const partSubtotal = subtotals[index] ?? 0;
+      const partDiscount = shares[index] ?? 0;
+      const amount = Math.max(0, partSubtotal - partDiscount) + group.delivery.fee;
+      const online = paymentMethod === PaymentMethod.ONLINE;
+      const paidAt = online ? at(spec.daysAgo) : delivered;
+      const returnStep = history.find((entry) => entry.status === ShopOrderStatus.RETURN_REQUESTED);
+      const answer = history.find((entry) => entry.status === ShopOrderStatus.DISPUTED);
+      const schedule = scheduleFor(last.status, new Date(last.changedAt));
+
+      return {
+        id: `so-${userId}-${spec.n}-${index + 1}`,
+        orderId: id,
+        userId,
+        boutiqueId: group.delivery.boutiqueId,
+        boutiqueNom: group.delivery.boutiqueNom,
+        reference: `${reference}-${index + 1}`,
+        items: group.items,
+        subtotal: partSubtotal,
+        discountAmount: partDiscount,
+        deliveryFee: group.delivery.fee,
+        amount,
+        delivery: group.delivery,
+        ...(spec.address && group.delivery.method !== DeliveryMode.PICKUP
+          ? { shippingAddress: shippingOf(spec.address) }
+          : {}),
+        customer: { nom: customer.nom, prenom: customer.prenom, telephone: customer.telephone },
+        payment: {
+          method: paymentMethod,
+          status: negative
+            ? online
+              ? ShopOrderPaymentStatus.REFUNDED
+              : ShopOrderPaymentStatus.VOID
+            : paidAt
+              ? ShopOrderPaymentStatus.PAID
+              : ShopOrderPaymentStatus.UNPAID,
+          paidAt,
+          refundedAmount: negative && online ? amount : 0,
+          refundedAt: negative && online ? last.changedAt : null,
+        },
+        status: last.status,
+        statusHistory: history,
+        pickupCode: generatePickupCode(),
+        deliveryAttempts: history.filter((entry) => entry.status === ShopOrderStatus.SHIPPED).length,
+        return: returnStep
+          ? {
+              reason: returnStep.reason ?? "not_as_described",
+              details: returnStep.note,
+              photos: [],
+              requestedAt: returnStep.changedAt,
+              shopResponse: answer?.note,
+              respondedAt: answer?.changedAt ?? null,
+              resolvedAt: null,
+            }
+          : null,
+        deadlineAt: schedule.deadlineAt,
+        reminderAt: schedule.reminderAt,
+        createdAt: at(spec.daysAgo),
+        updatedAt: last.changedAt,
+      };
+    });
+
+    const status = orderStatusFrom(parts.map((part) => part.status));
+    const updatedAt = parts.map((part) => part.updatedAt).sort().pop() ?? at(spec.daysAgo);
     return {
-      id: `cmd-${userId}-${spec.n}`,
-      userId,
-      reference: `CMD-${Date.parse(at(spec.daysAgo)).toString()}-${100000 + spec.n * 7919}`,
-      items: spec.items,
-      subtotal,
-      discountAmount,
-      promotionCode: spec.code ?? null,
-      shippingFee,
-      amount: subtotal - discountAmount + shippingFee,
-      status: last?.status ?? "pending",
-      statusHistory,
-      deliveryMethod,
-      deliveries,
-      addressId: spec.address?.id ?? null,
-      ...(spec.address ? { shippingAddress: shippingOf(spec.address) } : {}),
-      createdAt: at(spec.daysAgo),
-      updatedAt: last?.changedAt ?? at(spec.daysAgo),
+      order: {
+        id,
+        userId,
+        reference,
+        items: spec.items,
+        subtotal,
+        discountAmount,
+        promotionCode: spec.code ?? null,
+        shippingFee,
+        amount: subtotal - discountAmount + shippingFee,
+        status,
+        statusHistory: [
+          { status: OrderStatus.IN_PROGRESS, changedAt: at(spec.daysAgo), note: "Commande créée" },
+          ...(status !== OrderStatus.IN_PROGRESS ? [{ status, changedAt: updatedAt }] : []),
+        ],
+        paymentMethod,
+        paymentStatus: paymentMethod === PaymentMethod.ONLINE ? OrderPaymentStatus.PAID : OrderPaymentStatus.ON_DELIVERY,
+        paidAt: paymentMethod === PaymentMethod.ONLINE ? at(spec.daysAgo) : null,
+        paymentExpiresAt: null,
+        deliveryMethod,
+        deliveries,
+        addressId: spec.address?.id ?? null,
+        ...(spec.address ? { shippingAddress: shippingOf(spec.address) } : {}),
+        createdAt: at(spec.daysAgo),
+        updatedAt,
+      },
+      parts,
     };
   };
 
-  const orders: MockOrder[] = [
+  const { PENDING, CONFIRMED, SHIPPED, READY_FOR_PICKUP, DELIVERED, RETURN_REQUESTED, DISPUTED, COMPLETED, REFUSED } =
+    ShopOrderStatus;
+
+  // Le gérant de démonstration (Volta Électrique) retrouve une commande dans
+  // chaque onglet ; l'administration, un litige à trancher.
+  const built = [
     order({
       n: 1,
-      daysAgo: 1,
-      items: [line(0, 40), line(13, 2)],
-      // Commande récente : passée avec les modes par boutique, comme dans le
-      // seed du back. Les plus anciennes gardent standard / express.
+      daysAgo: 0.2,
+      items: [line(0, 40), line(25, 2)],
       method: "flat_rate",
       address: chantier,
-      history: [["pending", 1]],
+      flows: {},
     }),
     order({
       n: 2,
       daysAgo: 4,
-      items: [line(2, 12), line(15, 6), line(16, 3)],
-      method: "standard",
+      items: [line(2, 12), line(15, 6), line(10, 3)],
+      method: "flat_rate",
       address: maison,
-      history: [
-        ["pending", 4],
-        ["confirmed", 3],
-        ["shipped", 1],
-      ],
+      flows: {
+        "Kaloum Céramique": [[PENDING, 4], [CONFIRMED, 3], [SHIPPED, 1]],
+        "Volta Électrique": [[PENDING, 4], [CONFIRMED, 3]],
+      },
     }),
     order({
       n: 3,
-      daysAgo: 9,
+      daysAgo: 2,
       items: [line(6, 1)],
       method: "pickup",
-      history: [
-        ["pending", 9],
-        ["confirmed", 9],
-      ],
+      flows: { "Pro Outillage": [[PENDING, 2], [CONFIRMED, 1.9], [READY_FOR_PICKUP, 1]] },
     }),
     order({
       n: 4,
+      daysAgo: 3,
+      items: [line(24, 5)],
+      method: "flat_rate",
+      address: maison,
+      payment: PaymentMethod.ONLINE,
+      flows: { "Volta Électrique": [[PENDING, 3], [CONFIRMED, 2.9], [SHIPPED, 2], [DELIVERED, 1]] },
+    }),
+    order({
+      n: 5,
+      daysAgo: 8,
+      items: [line(4, 1), line(26, 2)],
+      method: "flat_rate",
+      address: chantier,
+      flows: {
+        "Sanitaire Plus": [
+          [PENDING, 8],
+          [CONFIRMED, 7.9],
+          [SHIPPED, 7],
+          [DELIVERED, 6],
+          [RETURN_REQUESTED, 5, { reason: "not_as_described", note: "La teinte ne correspond pas à la photo de l'annonce." }],
+          [DISPUTED, 4.5, { note: "Le modèle livré est celui commandé : la référence figure sur le bon de livraison." }],
+        ],
+        "Volta Électrique": [
+          [PENDING, 8],
+          [CONFIRMED, 7.9],
+          [SHIPPED, 6],
+          [DELIVERED, 5],
+          [RETURN_REQUESTED, 0.5, { reason: "incomplete", note: "Il manque un rouleau sur les deux commandés." }],
+        ],
+      },
+    }),
+    order({
+      n: 6,
       daysAgo: 21,
       items: [line(3, 4), line(19, 2), line(20, 1)],
-      method: "standard",
+      method: "flat_rate",
       address: maison,
-      history: [
-        ["pending", 21],
-        ["confirmed", 20],
-        ["shipped", 19],
-        ["delivered", 17],
-      ],
+      flows: { "Coloris Conakry": [[PENDING, 21], [CONFIRMED, 20], [SHIPPED, 19], [DELIVERED, 17], [COMPLETED, 10]] },
       discount: 30_000,
       code: "BIENVENUE",
     }),
     order({
-      n: 5,
+      n: 7,
       daysAgo: 35,
       items: [line(9, 2), line(12, 3)],
-      method: "express",
+      method: "flat_rate",
       address: chantier,
-      history: [
-        ["pending", 35],
-        ["cancelled", 34],
-      ],
+      flows: { "Dépôt Matam": [[PENDING, 35], [REFUSED, 34, { reason: "out_of_stock", note: "Rupture de stock chez le dépôt." }]] },
     }),
     order({
-      n: 6,
+      n: 8,
       daysAgo: 60,
       items: [line(5, 1), line(10, 1), line(24, 5)],
-      method: "standard",
+      method: "flat_rate",
       address: maison,
-      history: [
-        ["pending", 60],
-        ["confirmed", 59],
-        ["shipped", 58],
-        ["delivered", 55],
-      ],
+      flows: { "Volta Électrique": [[PENDING, 60], [CONFIRMED, 59], [SHIPPED, 58], [DELIVERED, 55], [COMPLETED, 48]] },
     }),
   ];
 
-  // L'annulation porte un motif, comme lorsqu'un dépôt refuse une commande.
-  const cancelled = orders[4]?.statusHistory[1];
-  if (cancelled) cancelled.note = "Rupture de stock chez le dépôt.";
+  const orders = built.map((entry) => entry.order);
+  const shopOrders = built.flatMap((entry) => entry.parts);
 
-  return { addresses: [maison, chantier], orders };
+  return { addresses: [maison, chantier], orders, shopOrders };
 };

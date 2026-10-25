@@ -9,7 +9,7 @@ import { useDocumentTitle } from "../../../../shared/hooks/useDocumentTitle";
 import { AccountPage, formatDate } from "../../../account";
 import { useResource } from "../../../catalog";
 import { ShopRequestStatusBadge } from "../../../shop-request";
-import { AdminHeader, adminPaths, fetchShopRequests, type ShopRequestPage } from "../../shared";
+import { AdminHeader, AdminNav, adminPaths, fetchShopRequests, type ShopRequestPage } from "../../shared";
 import styles from "./ShopRequestsPage.module.css";
 
 const PAGE_SIZE = 10;
@@ -64,6 +64,7 @@ export const ShopRequestsPage = () => {
         lede="Les clients qui souhaitent vendre sur la plateforme. Approuver une demande ouvre la boutique et donne au demandeur l'accès à son espace vendeur."
         trail={[{ label: "Demandes de boutique" }]}
       />
+      <AdminNav />
 
       <div className={styles.toolbar}>
         <nav className={styles.filters} aria-label="Filtrer par statut">

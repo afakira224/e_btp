@@ -1,14 +1,7 @@
-import { ORDER_STATUS_LABELS, type OrderStatus } from "../../../../entities/order";
-import styles from "./OrderStatusBadge.module.css";
+import { ORDER_STATUS_LABELS, ORDER_STATUS_TONES, type OrderStatus } from "../../../../entities/order";
+import { StatusBadge } from "../../../../shared/ui";
 
-/**
- * Statut d'une commande. Les couleurs fonctionnelles de la charte portent
- * le sens (attente, livrée, annulée) ; le libellé reste toujours écrit, la
- * couleur n'est jamais seule à parler.
- */
+/** Statut global d'une commande, déduit de ses sous-commandes. */
 export const OrderStatusBadge = ({ status }: { status: OrderStatus }) => (
-  <span className={[styles.badge, styles[status]].join(" ")}>
-    <span className={styles.dot} aria-hidden="true" />
-    {ORDER_STATUS_LABELS[status]}
-  </span>
+  <StatusBadge tone={ORDER_STATUS_TONES[status]}>{ORDER_STATUS_LABELS[status]}</StatusBadge>
 );

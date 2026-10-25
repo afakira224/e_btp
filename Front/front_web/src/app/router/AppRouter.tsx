@@ -18,12 +18,18 @@ import {
   PromotionsPage,
   SousCategoriePage,
 } from "../../features/catalog";
-import { CartPage, CheckoutPage } from "../../features/cart";
+import { CartPage, CheckoutPage, PaymentPage } from "../../features/cart";
 import { SearchResultsPage } from "../../features/search";
 import { ShopPage, ShopsPage } from "../../features/shops";
 import { WishlistPage } from "../../features/wishlist";
 import { ShopRequestFormPage, ShopRequestStatusPage } from "../../features/shop-request";
-import { AdminGuard, ShopRequestReviewPage, ShopRequestsPage } from "../../features/admin";
+import {
+  AdminGuard,
+  AdminOrdersPage,
+  AdminShopOrderPage,
+  ShopRequestReviewPage,
+  ShopRequestsPage,
+} from "../../features/admin";
 import { HomePage } from "../../features/home";
 import {
   AccountOverviewPage,
@@ -42,6 +48,8 @@ import {
   SellerShopLayout,
   ShopDeliveryPage,
   ShopInfoPage,
+  ShopOrderPage,
+  ShopOrdersPage,
 } from "../../features/seller";
 import { SiteLayout } from "../../shared/layout";
 import { ROUTES } from "./routes";
@@ -86,6 +94,7 @@ export const AppRouter = () => (
         <Route element={<AuthGuard />}>
           <Route path={ROUTES.panier} element={<CartPage />} />
           <Route path={ROUTES.commande} element={<CheckoutPage />} />
+          <Route path={ROUTES.paiement} element={<PaymentPage />} />
           <Route path={ROUTES.favoris} element={<WishlistPage />} />
 
           {/* Espace compte : « Mon compte » présente les rubriques, chacune
@@ -106,7 +115,9 @@ export const AppRouter = () => (
           <Route element={<SellerGuard />}>
             <Route path={ROUTES.seller} element={<SellerHomePage />} />
             <Route path={ROUTES.sellerShop} element={<SellerShopLayout />}>
-              <Route index element={<Navigate to="produits" replace />} />
+              <Route index element={<Navigate to="commandes" replace />} />
+              <Route path={ROUTES.sellerOrders} element={<ShopOrdersPage />} />
+              <Route path={ROUTES.sellerOrder} element={<ShopOrderPage />} />
               <Route path={ROUTES.sellerProducts} element={<OffersPage />} />
               <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
               <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
@@ -116,11 +127,14 @@ export const AppRouter = () => (
           </Route>
 
           {/* Administration : comptes admin seulement. L'accueil de l'espace
-              est la file des demandes de boutique à examiner. */}
+              est la file des demandes de boutique à examiner ; les commandes
+              et les litiges ont leur rubrique. */}
           <Route element={<AdminGuard />}>
             <Route path={ROUTES.admin} element={<Navigate to={ROUTES.adminShopRequests} replace />} />
             <Route path={ROUTES.adminShopRequests} element={<ShopRequestsPage />} />
             <Route path={ROUTES.adminShopRequest} element={<ShopRequestReviewPage />} />
+            <Route path={ROUTES.adminOrders} element={<AdminOrdersPage />} />
+            <Route path={ROUTES.adminOrder} element={<AdminShopOrderPage />} />
           </Route>
         </Route>
       </Route>

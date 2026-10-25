@@ -1,12 +1,8 @@
 import type { User } from "../../../entities/user";
-import type { Order, OrderStatus, ShippingAddress } from "../../../entities/order";
 import type { Address } from "../../../entities/address";
-import { DeliveryMode } from "../../../entities/delivery";
 import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
-import type { MockAddress, MockOrder } from "./accountSeed";
-import { quoteDelivery, readSelection, summaryMethod, toOrderDeliveries } from "./deliveryRules";
-import { findLiveOffer } from "./liveCatalog";
+import type { MockAddress } from "./accountSeed";
 import { objectId, readDb, writeDb } from "./mockDb";
 
 // ─────────────────────────────────────────────
@@ -19,12 +15,10 @@ import { objectId, readDb, writeDb } from "./mockDb";
 //   PUT    /addresses/:id            { …AddressInput partiel }
 //   PATCH  /addresses/:id/default
 //   DELETE /addresses/:id
-//   GET    /orders?userId=&status=&page=&limit=
-//   GET    /orders/:id
-//   POST   /orders/:userId          { addressId?, deliveries?, deliveryMethod?, telephone? }
 //
 //  Mêmes codes, mêmes messages et même logique « adresse par défaut » que
-//  Back/src/controllers/{authController,address,order}.controller.ts.
+//  Back/src/controllers/{authController,address}.controller.ts. Les
+//  commandes vivent dans orders.ts.
 // ─────────────────────────────────────────────
 
 const ok = <T>(data: T, message: string, statusCode = 200): ApiResponse<T> => ({
@@ -217,180 +211,4 @@ export const deleteAddress = (id: string) => {
   }
   writeDb(db);
   return ok(null, "Adresse supprimée avec succès");
-};
-
-// ── Commandes ─────────────────────────────────
-/** Enrichissement façon `buildOrderDto` : offre, boutique et produit imbriqués. */
-const toOrder = (order: MockOrder): Order => ({
-  ...order,
-  items: order.items.map((item) => {
-    const offer = findLiveOffer(item.productBoutiqueId);
-    return {
-      productBoutique: offer,
-      boutique: offer?.boutique,
-      product: offer?.product,
-      price: item.price,
-      quantity: item.quantity,
-      lineTotal: item.price * item.quantity,
-    };
-  }),
-  totalItems: order.items.reduce((sum, item) => sum + item.quantity, 0),
-});
-
-export const listOrders = (params: URLSearchParams) => {
-  const userId = params.get("userId");
-  requireSelf(userId);
-  const status = params.get("status") as OrderStatus | null;
-  const page = Math.max(1, Number(params.get("page") ?? 1));
-  const limit = Math.min(100, Math.max(1, Number(params.get("limit") ?? 10)));
-
-  const all = readDb()
-    .orders.filter((order) => order.userId === userId && (!status || order.status === status))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  return ok(
-    {
-      orders: all.slice((page - 1) * limit, page * limit).map(toOrder),
-      total: all.length,
-      page,
-      totalPages: Math.ceil(all.length / limit),
-    },
-    "Commandes récupérées avec succès"
-  );
-};
-
-export const getOrder = (id: string) => {
-  const user = sessionUser();
-  const order = readDb().orders.find((candidate) => candidate.id === id);
-  if (!order) throw new ApiError("Commande non trouvée", 404);
-  if (order.userId !== user._id && user.role !== "admin") {
-    throw new ApiError("Vous ne pouvez consulter que vos propres commandes.", 403);
-  }
-  return ok(toOrder(order), "Commande récupérée avec succès");
-};
-
-// ─────────────────────────────────────────────
-//  POST /orders/:userId — checkout depuis le panier.
-//  Même enchaînement que createOrder (Back/src/controllers/order.controller.ts) :
-//  panier, offres, livraisons, adresse, stock, puis instantané. Les frais
-//  viennent du devis, jamais du corps de la requête.
-// ─────────────────────────────────────────────
-interface CheckoutBody {
-  addressId?: unknown;
-  deliveries?: unknown;
-  deliveryMethod?: unknown;
-  telephone?: unknown;
-  adresse?: unknown;
-  code?: unknown;
-}
-
-export const createOrder = (userId: string, body: CheckoutBody = {}) => {
-  requireSelf(userId);
-
-  const { selection, errors } = readSelection(body);
-  const telephone = typeof body.telephone === "string" ? body.telephone.trim() : undefined;
-  if (telephone !== undefined && (telephone.length < 9 || telephone.length > 12)) {
-    errors.push("Entre 9 et 12 caractères.");
-  }
-  if (errors.length > 0) throw new ApiError(errors.join(" | "), 422);
-  // Les coupons vivent dans les promotions du back, que le mode simulé ne porte pas.
-  if (body.code !== undefined) throw new ApiError("Coupon introuvable", 404);
-
-  const db = readDb();
-  const cart = db.carts.find((entry) => entry.userId === userId);
-  if (!cart || cart.items.length === 0) throw new ApiError("Le panier est vide.", 400);
-
-  const lines = cart.items.map((item) => ({ item, offer: findLiveOffer(item.productBoutiqueId) }));
-  const missing = lines.find((line) => !line.offer);
-  if (missing) {
-    throw new ApiError(
-      `Un produit du panier n'est plus disponible (${missing.item.productBoutiqueId}).`,
-      400
-    );
-  }
-
-  // ── Livraisons : une par boutique ─────────
-  const quote = quoteDelivery(
-    lines.map(({ item, offer }) => ({ offer: offer!, quantity: item.quantity })),
-    selection
-  );
-  if (!quote.ready) {
-    throw new ApiError(
-      quote.groups.find((group) => group.error)?.error ?? "Aucune livraison possible pour ce panier.",
-      400
-    );
-  }
-  const deliveries = toOrderDeliveries(quote);
-  const requiresAddress = deliveries.some((delivery) => delivery.method !== DeliveryMode.PICKUP);
-
-  // ── Adresse : copiée dans la commande ─────
-  let shippingAddress: ShippingAddress | undefined;
-  let addressId: string | null = null;
-  if (typeof body.addressId === "string" && body.addressId) {
-    const address = db.addresses.find(
-      (candidate) => candidate.id === body.addressId && candidate.deletedAt === null
-    );
-    if (!address) throw new ApiError("Adresse de livraison introuvable", 404);
-    if (address.userId !== userId) throw new ApiError("Cette adresse ne vous appartient pas.", 403);
-    addressId = address.id;
-    shippingAddress = {
-      destinataire: address.destinataire,
-      telephone: address.telephone,
-      adresse: address.adresse,
-      ville: address.ville,
-      commune: address.commune,
-      pays: address.pays,
-    };
-  } else if (requiresAddress && !body.adresse) {
-    throw new ApiError("Une adresse de livraison est requise (addressId ou adresse).", 400);
-  }
-
-  // ── Stock : vérifié puis décrémenté ───────
-  const now = new Date().toISOString();
-  for (const { item, offer } of lines) {
-    if (offer!.stock < item.quantity) {
-      throw new ApiError(`Stock insuffisant pour un produit (disponible : ${offer!.stock}).`, 400);
-    }
-  }
-  for (const { item, offer } of lines) {
-    const stock = offer!.stock - item.quantity;
-    const created = db.offers.find((candidate) => candidate.id === offer!.id);
-    if (created) Object.assign(created, { stock, updatedAt: now });
-    else db.offerPatches[offer!.id] = { ...db.offerPatches[offer!.id], stock, updatedAt: now };
-  }
-
-  const items = cart.items.map((item) => ({
-    productBoutiqueId: item.productBoutiqueId,
-    price: item.price,
-    quantity: item.quantity,
-  }));
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const order: MockOrder = {
-    id: objectId(),
-    userId,
-    reference: `CMD-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
-    items,
-    subtotal,
-    discountAmount: 0,
-    promotionCode: null,
-    shippingFee: quote.shippingFee,
-    amount: subtotal + quote.shippingFee,
-    status: "pending",
-    statusHistory: [{ status: "pending", changedAt: now, note: "Commande créée" }],
-    deliveryMethod: summaryMethod(deliveries.map((delivery) => delivery.method)),
-    deliveries,
-    addressId,
-    ...(shippingAddress ? { shippingAddress } : {}),
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  db.orders.push(order);
-  // Le panier est vidé une fois la commande enregistrée.
-  cart.items = [];
-  cart.amount = 0;
-  cart.updatedAt = now;
-  writeDb(db);
-
-  return ok(toOrder(order), "Commande créée avec succès", 201);
 };

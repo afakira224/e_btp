@@ -27,6 +27,8 @@ import {
   updateCartItem,
 } from "./cartWishlist";
 import * as account from "./account";
+import * as orders from "./orders";
+import * as shopOrders from "./shopOrders";
 import * as seller from "./seller";
 import * as shopRequests from "./shopRequests";
 import { allShops, findLiveOffer, liveCatalog, rawShop } from "./liveCatalog";
@@ -609,7 +611,9 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
     case "POST /addresses":
       return account.createAddress(body as Parameters<typeof account.createAddress>[0]);
     case "GET /orders":
-      return account.listOrders(params);
+      return orders.listOrders(params);
+    case "GET /shop-orders":
+      return shopOrders.listShopOrders(params);
     case "GET /products":
       return seller.listProducts(params);
     case "POST /product-boutiques":
@@ -676,16 +680,41 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
   }
 
   const commande = /^GET \/orders\/([^/]+)$/.exec(key);
-  if (commande?.[1]) return account.getOrder(decodeURIComponent(commande[1]));
+  if (commande?.[1]) return orders.getOrder(decodeURIComponent(commande[1]));
 
   // Checkout : l'identifiant est celui de l'utilisateur, pas d'une commande.
   const checkout = /^POST \/orders\/([^/]+)$/.exec(key);
   if (checkout?.[1]) {
-    return account.createOrder(
+    return orders.createOrder(
       decodeURIComponent(checkout[1]),
-      body as Parameters<typeof account.createOrder>[1]
+      body as Parameters<typeof orders.createOrder>[1]
     );
   }
+
+  // ── Sous-commandes et paiement ────────────
+  const sousCommandeAction = /^PATCH \/shop-orders\/([^/]+)\/([^/]+)$/.exec(key);
+  if (sousCommandeAction?.[1] && sousCommandeAction[2]) {
+    return shopOrders.performAction(
+      decodeURIComponent(sousCommandeAction[1]),
+      decodeURIComponent(sousCommandeAction[2]),
+      body
+    );
+  }
+
+  const sousCommande = /^GET \/shop-orders\/([^/]+)$/.exec(key);
+  if (sousCommande?.[1]) return shopOrders.getShopOrder(decodeURIComponent(sousCommande[1]));
+
+  // Avant `/payments/:orderId`, qui capturerait sinon `sandbox`.
+  const paiementSimule = /^POST \/payments\/sandbox\/([^/]+)$/.exec(key);
+  if (paiementSimule?.[1]) {
+    return orders.settleSandboxPayment(
+      decodeURIComponent(paiementSimule[1]),
+      body as Parameters<typeof orders.settleSandboxPayment>[1]
+    );
+  }
+
+  const paiement = /^POST \/payments\/([^/]+)$/.exec(key);
+  if (paiement?.[1]) return orders.restartPayment(decodeURIComponent(paiement[1]));
 
   const boutique = /^GET \/shops\/([^/]+)$/.exec(key);
   if (boutique?.[1]) return getShop(decodeURIComponent(boutique[1]));

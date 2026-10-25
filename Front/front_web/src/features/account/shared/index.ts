@@ -3,7 +3,6 @@ export {
   createAddress,
   deleteAddress,
   fetchAddresses,
-  fetchOrder,
   fetchOrders,
   setDefaultAddress,
   updateAddress,

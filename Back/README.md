@@ -28,6 +28,7 @@ L'API écoute sur `http://localhost:5000`, la documentation Swagger sur
 | `npm run seed` | Remplit une base vide avec le catalogue de démonstration |
 | `npm run seed:reset` | Vide les collections du seed puis les remplit à nouveau |
 | `npm run seed:volume` | Vide, puis catalogue de volume (100 familles, 15 000 sous-catégories, 5,25 millions de produits) |
+| `npm run migrate:shop-orders` | Découpe les commandes existantes en sous-commandes par boutique (idempotente) |
 | `npm test` | Suite de tests unitaires (aucune base requise) |
 | `npm run test:watch` | Tests en mode continu |
 | `npm run test:coverage` | Tests + rapport dans `coverage/index.html` |
@@ -42,7 +43,7 @@ L'API écoute sur `http://localhost:5000`, la documentation Swagger sur
 - 32 produits et 32 offres, avec **5 photos chacun** dans `uploads/seed/products/`, servies sous `/uploads/seed/products/…` ;
 - une vente flash en cours et deux coupons (`BIENVENUE10`, `CHANTIER50`) ;
 - 18 avis ;
-- un compte client `mamadou@btp.com` avec 2 adresses, 6 commandes (tous les statuts), des favoris et des produits récemment vus.
+- un compte client `mamadou@btp.com` avec 2 adresses, 6 commandes découpées en sous-commandes par boutique, des favoris et des produits récemment vus.
 
 Tous les comptes sont vérifiés. Le mot de passe est `Secret@123`, ou la valeur de `SEED_PASSWORD`. Ces identifiants servent au **développement uniquement** : le seed refuse de tourner quand `NODE_ENV=production`, et sur une base qui contient déjà un catalogue (utilisez alors `npm run seed:reset`).
 
@@ -125,7 +126,7 @@ Règles appliquées :
 
 - **Lecture publique** : catalogue (produits, boutiques, taxonomie), avis, promotions actives.
 - **Utilisateur authentifié** : panier, favoris, commandes, adresses — uniquement les siens.
-- **Admin / boutique** : création et modification du catalogue, changement de statut des commandes.
+- **Admin / boutique** : création et modification du catalogue. Chaque boutique fait avancer ses propres sous-commandes ; l'administration tranche les litiges.
 - **Boutique** : uniquement ses propres boutiques et leurs produits (`canManageShop`, `shared/helpers/shopAccess.ts`) — réglages, livraison, offres. `requireRole` ne vérifie que le type de compte.
 - **Admin seul** : promotions, suppressions, examen des demandes d'ouverture de boutique.
 
@@ -231,21 +232,113 @@ livraisons sont figés au moment du checkout et ne changent plus.
 
 `montant = sous-total − réduction + frais de livraison` (la réduction ne porte que sur les articles).
 
-Le cycle de vie est un graphe orienté ; les sauts incohérents sont refusés :
+### Une sous-commande par boutique
+
+Au checkout, la commande est découpée en **sous-commandes** (`ShopOrder`,
+collection `shop_order`), une par boutique : ses articles, sa livraison, sa part
+du coupon (au prorata, méthode du plus fort reste), son paiement, son code de
+remise et son historique. Chaque boutique avance à son rythme ; le statut de la
+commande se **déduit** de ses parties (`orderStatusFrom`) : `in_progress` tant
+qu'une partie n'est pas finie, puis `completed`, `partially_completed` ou
+`cancelled`.
+
+Il n'existe pas de « changer le statut » libre : chaque étape est une **action**
+nommée, permise à certains acteurs depuis certains statuts
+(`shared/helpers/shopOrder.workflow.ts`). `availableActions` dans chaque DTO dit
+quels boutons montrer à ce lecteur.
+
+Parcours positif :
 
 ```
-pending ──→ confirmed ──→ shipped ──→ delivered
-   │            │            │
-   └────────────┴────────────┴──→ cancelled
+pending ─confirm→ confirmed ─ship→ shipped ──────────deliver→ delivered ─7 j→ completed
+                      └─ready→ ready_for_pickup ─deliver─┘
 ```
 
-Chaque transition est horodatée dans `statusHistory` avec son auteur et une note
-facultative. L'annulation restitue le stock et l'utilisation du coupon.
-Un email part à la création de la commande puis à chaque changement de statut.
+Fins négatives :
+
+```
+pending            ─refuse→ refused   ─cancel→ cancelled   ─48 h→ expired
+confirmed          ─refuse→ refused   ─cancel→ cancelled
+ready_for_pickup   ─7 j→ expired
+shipped            ─delivery-failed→ delivery_failed ─retry (2 tentatives)→ shipped
+                                                     ─abandon→ failed
+delivered          ─return→ return_requested ─accept-return→ returned
+                                             ─reject-return ou 48 h→ disputed ─resolve-dispute→ returned | completed
+```
+
+L'administration peut annuler d'office (`admin-cancel`) toute sous-commande pas
+encore livrée.
+
+| Action | Qui | Depuis |
+| --- | --- | --- |
+| `confirm`, `refuse` (motif) | boutique | `pending` (`refuse` aussi depuis `confirmed`) |
+| `ship` / `ready` | boutique | `confirmed` — `ready` pour un retrait en boutique |
+| `deliver` (code de remise à 6 chiffres) | boutique | `shipped`, `ready_for_pickup` |
+| `delivery-failed` (motif), `retry`, `abandon` | boutique | `shipped` / `delivery_failed` |
+| `cancel` (motif facultatif) | client | `pending`, `confirmed` |
+| `return` (motif, photos si abîmé) | client | `delivered`, dans les 7 jours |
+| `accept-return`, `reject-return` (motif) | boutique | `return_requested` |
+| `resolve-dispute` (remboursement total, partiel ou rejet) | admin | `disputed` |
+| `admin-cancel` (motif) | admin | avant la livraison |
+| `confirm-refund` | boutique, admin | remboursement à la remise en attente |
+
+Le **code de remise** n'est lu que par le client ; la boutique le lui demande à la
+remise. Le client ne voit pas les coordonnées d'autres clients, la boutique ne
+voit pas le code.
+
+**Fins négatives.** Le stock est rendu (sauf refus pour rupture : l'offre passe
+à 0 ; et retour : la boutique juge si le produit est revendable). Payé en ligne,
+le client est remboursé par le prestataire ; payé à la remise, la boutique
+rembourse en reprenant le produit puis le confirme (`confirm-refund`). Un échec
+de livraison causé par le client (absent, colis refusé — motif lu à l'échec)
+ne rembourse pas les frais de livraison. Quand toute la commande échoue,
+l'utilisation du coupon est rendue.
+
+### Délais automatiques
+
+Toutes les 15 minutes (`ORDER_SCHEDULER=off` pour couper sur une instance),
+`runOrderDeadlines` applique les échéances avec les mêmes règles qu'une action :
+
+| Statut | Échéance | Effet |
+| --- | --- | --- |
+| paiement en ligne en attente | 30 min | commande échouée, stock rendu, panier restauré |
+| `pending` | 48 h (rappel à 24 h) | `expired`, client remboursé |
+| `ready_for_pickup` | 7 j (rappel à 3 j) | `expired` |
+| `delivered` | 7 j | `completed` |
+| `return_requested` | 48 h (rappel à 24 h) | `disputed` |
+| `shipped` | 7 j | alerte à l'administration, sans décision |
+
+### Paiement
+
+`paymentMethod` au checkout : `on_delivery` (par défaut, chaque boutique encaisse
+à la remise) ou `online`. En ligne, la commande attend son paiement
+(`awaiting_payment`) : stock réservé, sous-commandes invisibles des boutiques.
+La réponse du checkout porte `payment.redirectUrl`, la page du prestataire.
+
+- `PAYMENT_PROVIDER` choisit le prestataire ; hors production, le défaut est
+  `sandbox`, un prestataire simulé dont la page est `APP_URL/paiement/:orderId`.
+- `POST /payments/sandbox/:orderId { outcome: paid | failed }` joue le rôle de la
+  notification signée d'un vrai prestataire (désactivé en production).
+- `POST /payments/:orderId` relance le paiement d'une commande en attente.
+- Un paiement confirmé après l'échec de la commande (délai dépassé) est
+  remboursé aussitôt.
+
+### Routes
+
+| Route | Accès |
+| --- | --- |
+| `GET /shop-orders?boutiqueId=&group=&status=&search=&page=` | boutique (la sienne), admin — `counts` par onglet |
+| `GET /shop-orders/:id` | client, boutique, admin |
+| `PATCH /shop-orders/:id/:action` | selon l'action ; multipart (`photos`, 3 max) pour `return` |
+| `GET /orders` | un client ne lit que ses commandes, quel que soit `userId` |
+
+Les emails (nouvelle commande, confirmation, expédition avec le code, échec,
+retour, litige, remboursement, rappels) partent après la transaction ; les
+alertes de l'administration vont à `ADMIN_EMAIL`.
 
 ## Tests
 
-820+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
+1 270+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
 sessions de transaction, `express-validator`, `fs` et les emails sont simulés.
 
 Voir [tests/README.md](tests/README.md) pour l'organisation et le guide d'ajout.
@@ -265,6 +358,19 @@ db.product_boutiques.updateMany({ deleteAt: { $exists: true } }, { $rename: { de
 
 Les commandes existantes n'ont ni `shippingFee`, ni `deliveryMethod`, ni
 `statusHistory` : les valeurs par défaut du schéma s'appliquent à la lecture.
+
+### Sous-commandes
+
+```bash
+npm run migrate:shop-orders
+```
+
+Chaque commande sans sous-commande en reçoit une par boutique, avec ses articles,
+sa livraison et sa part du coupon. Livrée devient `completed`, annulée reste
+`cancelled`, le reste reprend son statut (une commande `pending` expirera 48 h
+après la migration si la boutique ne la confirme pas). Idempotente ; le seed
+l'applique à ses commandes de démonstration. La route
+`PATCH /orders/:id/status` a disparu au profit des actions par sous-commande.
 
 ### Modes de livraison par boutique
 
