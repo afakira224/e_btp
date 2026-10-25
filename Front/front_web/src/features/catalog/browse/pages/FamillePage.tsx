@@ -14,14 +14,15 @@ import {
   useInfiniteProducts,
   useResource,
 } from "../../shared";
+import { CategorieTile, CategorieTiles } from "../components/CategorieTile";
+import styles from "./FamillePage.module.css";
 
 const PAGE_SIZE = 8;
-import { CategorieCard } from "../components/CategorieCard";
-import styles from "../components/TaxonomyCard.module.css";
 
 // ─────────────────────────────────────────────
-//  Un domaine : ses catégories, leurs sous-catégories, et les produits
-//  qu'il contient tous niveaux confondus.
+//  Un domaine : ses catégories en tuiles (avec leurs premiers rayons, comme
+//  sur la page catalogue), puis les produits qu'il contient tous niveaux
+//  confondus.
 // ─────────────────────────────────────────────
 export const FamillePage = () => {
   const { familleId = "" } = useParams<{ familleId: string }>();
@@ -79,11 +80,11 @@ export const FamillePage = () => {
         <CatalogSkeletons count={3} />
       ) : (
         <>
-          <div className={styles.categories}>
+          <CategorieTiles>
             {(data?.categories ?? []).map((categorie) => (
-              <CategorieCard key={categorie.id} categorie={categorie} />
+              <CategorieTile key={categorie.id} categorie={categorie} />
             ))}
-          </div>
+          </CategorieTiles>
 
           <div className={styles.produits}>
             <h2 className={styles.produitsTitre}>Produits du domaine</h2>

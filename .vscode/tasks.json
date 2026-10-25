@@ -1,0 +1,33 @@
+{
+  // Lance le back et le front web, chacun dans son terminal VS Code.
+  // Ctrl+Maj+B, ou Terminal > Exécuter la tâche… > « Lancer back + front ».
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "back",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/Back" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "serveurs", "reveal": "always" }
+    },
+    {
+      "label": "front_web",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/Front/front_web" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "serveurs", "reveal": "always" }
+    },
+    {
+      "label": "Lancer back + front",
+      "dependsOn": ["back", "front_web"],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "runOptions": { "runOn": "folderOpen" }
+    }
+  ]
+}

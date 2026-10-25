@@ -11,11 +11,14 @@ import type { IProductBoutique } from "../models/product.model.js";
 import type { IShop } from "../models/boutique.model.js";
 import { quoteDelivery, toOrderDeliveries } from "../shared/helpers/delivery.helper.js";
 import { EntityType } from "../models/user.model.js";
+import { Etape, type AvancementChantier, type TypeProjet } from "../models/projet.model.js";
+import { complementaritesParRegles } from "./complementarites.js";
 import {
   categories,
   demoAddresses,
   demoCustomer,
   demoOrders,
+  demoProjet,
   familles,
   offers,
   products,
@@ -65,6 +68,7 @@ export interface SeedData {
   familles: Doc[];
   categories: Doc[];
   sousCategories: Doc[];
+  complementarites: Doc[];
   shops: Doc[];
   products: Doc[];
   productBoutiques: Doc[];
@@ -119,6 +123,11 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
 
   account({ prenom: "Admin", nom: "BTP", email: "admin@btp.com" }, EntityType.ADMIN, at(180 * DAY));
   const customer = account({ ...demoCustomer }, EntityType.USER, at(90 * DAY));
+  customer.projet = {
+    types: [...demoProjet.types] as TypeProjet[],
+    avancement: demoProjet.avancement as AvancementChantier,
+    renseigneLe: at(90 * DAY),
+  };
   const reviewerUsers = reviewers.map((r, i) => account(r, EntityType.USER, at((60 - i * 7) * DAY)));
   const owners = new Map([...shopById.values()].map((s) => [s.key, account(s.owner, EntityType.SHOP, at(120 * DAY))]));
 
@@ -135,12 +144,24 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
   }));
   const categorieDocs = [...catById.values()].map((c) => ({
     _id: c._id, familleId: need(famById, c.famille, "famille")._id, nom: c.nom, description: c.description,
-    image: firstImage((p) => p.categorie === c.key), ordre: c.ordre, actif: true, ...stamp(since),
+    image: firstImage((p) => p.categorie === c.key), ordre: c.ordre, actif: true, etape: c.etape as Etape, ...stamp(since),
   }));
   const sousCategorieDocs = [...scById.values()].map((s) => ({
     _id: s._id, categorieId: need(catById, s.categorie, "catégorie")._id, nom: s.nom, description: s.description,
     image: firstImage((p) => p.sousCategorie === s.key), ordre: s.ordre, actif: true, ...stamp(since),
   }));
+
+  // Rayons liés par les règles « acheté avec » (articles = noms des photos).
+  const complementariteDocs = complementaritesParRegles(
+    [...scById.values()].map((s) => {
+      const categorie = need(catById, s.categorie, "catégorie");
+      return {
+        sousId: s._id, categorieId: categorie._id, familleId: need(famById, categorie.famille, "famille")._id,
+        articles: [...new Set(products.filter((p) => p.sousCategorie === s.key).map((p) => p.image))],
+      };
+    }),
+    since
+  );
 
   // ── Boutiques ───────────────────────────────
   const shopDocs = [...shopById.values()].map((s) => ({
@@ -279,6 +300,7 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
   return {
     users, logins,
     familles: familleDocs, categories: categorieDocs, sousCategories: sousCategorieDocs,
+    complementarites: complementariteDocs,
     shops: shopDocs, products: productDocs, productBoutiques: offerDocs,
     promotions: promotionDocs, reviews: reviewDocs,
     addresses: addressDocs, orders: orderDocs,

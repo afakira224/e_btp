@@ -1,5 +1,7 @@
 import { Types } from "mongoose";
 import { EntityType } from "../models/user.model.js";
+import { Etape } from "../models/projet.model.js";
+import { complementaritesParRegles } from "./complementarites.js";
 import { imagesFor, type SeedData } from "./build.js";
 import { offers as demoOffers, products as demoProducts } from "./catalog.data.js";
 
@@ -73,16 +75,19 @@ const THEMES: Theme[] = [
 ];
 const themeByImage = new Map(THEMES.map((t) => [t.image, t]));
 
-/** Domaines des familles générées, chacun avec ses catégories et les articles qu'elles vendent. */
-const DOMAINS: { nom: string; categories: [string, string[]][] }[] = [
-  { nom: "Gros œuvre", categories: [["Liants et bétons", ["ciment", "betonniere"]], ["Aciers et armatures", ["fer", "treillis"]], ["Blocs et agrégats", ["parpaing", "gravier", "sable"]]] },
-  { nom: "Revêtements", categories: [["Carrelage", ["carrelage", "colle"]], ["Faïence et plinthes", ["faience", "plinthe"]], ["Parquets", ["parquet"]]] },
-  { nom: "Peinture", categories: [["Peintures", ["peinture-facade", "peinture-interieure"]], ["Préparation des supports", ["sous-couche", "enduit"]], ["Outils du peintre", ["kit-peintre"]]] },
-  { nom: "Plomberie", categories: [["Évacuation", ["tube-pvc"]], ["Robinetterie", ["mitigeur"]], ["Sanitaire et eau chaude", ["wc", "chauffe-eau"]]] },
-  { nom: "Électricité", categories: [["Câblage", ["cable"]], ["Protection", ["tableau", "disjoncteur"]], ["Éclairage et appareillage", ["projecteur", "prise"]]] },
-  { nom: "Outillage", categories: [["Perçage", ["perforateur"]], ["Découpe et meulage", ["meuleuse"]], ["Mesure", ["niveau-laser"]]] },
-  { nom: "Matériel de chantier", categories: [["Manutention", ["brouette"]], ["Accès en hauteur", ["echafaudage"]], ["Malaxage", ["betonniere"]]] },
-  { nom: "Sécurité", categories: [["Protection de la tête", ["casque"]], ["Équipements de protection", ["casque"]], ["Balisage de chantier", ["casque", "projecteur"]]] },
+/**
+ * Domaines des familles générées, chacun avec son étape du chantier, ses
+ * catégories et les articles qu'elles vendent.
+ */
+const DOMAINS: { nom: string; etape: Etape; categories: [string, string[]][] }[] = [
+  { nom: "Gros œuvre", etape: Etape.GROS_OEUVRE, categories: [["Liants et bétons", ["ciment", "betonniere"]], ["Aciers et armatures", ["fer", "treillis"]], ["Blocs et agrégats", ["parpaing", "gravier", "sable"]]] },
+  { nom: "Revêtements", etape: Etape.REVETEMENTS, categories: [["Carrelage", ["carrelage", "colle"]], ["Faïence et plinthes", ["faience", "plinthe"]], ["Parquets", ["parquet"]]] },
+  { nom: "Peinture", etape: Etape.FINITIONS, categories: [["Peintures", ["peinture-facade", "peinture-interieure"]], ["Préparation des supports", ["sous-couche", "enduit"]], ["Outils du peintre", ["kit-peintre"]]] },
+  { nom: "Plomberie", etape: Etape.RESEAUX, categories: [["Évacuation", ["tube-pvc"]], ["Robinetterie", ["mitigeur"]], ["Sanitaire et eau chaude", ["wc", "chauffe-eau"]]] },
+  { nom: "Électricité", etape: Etape.RESEAUX, categories: [["Câblage", ["cable"]], ["Protection", ["tableau", "disjoncteur"]], ["Éclairage et appareillage", ["projecteur", "prise"]]] },
+  { nom: "Outillage", etape: Etape.TRANSVERSE, categories: [["Perçage", ["perforateur"]], ["Découpe et meulage", ["meuleuse"]], ["Mesure", ["niveau-laser"]]] },
+  { nom: "Matériel de chantier", etape: Etape.TRANSVERSE, categories: [["Manutention", ["brouette"]], ["Accès en hauteur", ["echafaudage"]], ["Malaxage", ["betonniere"]]] },
+  { nom: "Sécurité", etape: Etape.TRANSVERSE, categories: [["Protection de la tête", ["casque"]], ["Équipements de protection", ["casque"]], ["Balisage de chantier", ["casque", "projecteur"]]] },
 ];
 const QUALIFIERS = ["Pro", "Chantier", "Habitat", "Industrie", "Rénovation", "Négoce", "Atelier", "Bâtiment", "Travaux publics", "Export", "Express", "Grand compte", "Artisan"];
 const BRANDS = ["Sahel Pro", "BatiGuinée", "Atlantique BTP", "Fouta Outils", "Kaloum Industrie", "Niger Équipement", "Loos Distribution", "Simandou Matériaux"];
@@ -106,6 +111,8 @@ export interface ExpandedCatalog {
   shops: Doc[];
   users: Doc[];
   logins: (Doc & { password: string })[];
+  /** Liens « acheté avec » entre rayons, d'après les règles par article. */
+  complementarites: Doc[];
   /** Pour chaque sous-catégorie : son article, sa boutique, ses produits déjà présents. */
   rayons: { sous: Doc; theme: Theme; shopId: Types.ObjectId; existing: number }[];
 }
@@ -181,7 +188,7 @@ export function expandCatalog(base: SeedData, opts: VolumeOptions, now: Date, pa
     const own = categories.filter((c) => String(c.familleId) === String(f._id));
     const pool = own.flatMap((c) => categoryThemes.get(String(c._id)) ?? []);
     for (let n = own.length; n < opts.categoriesParFamille; n++) {
-      const doc: Doc = { _id: new Types.ObjectId(), familleId: f._id, nom: `${f.nom} — sélection ${n + 1}`, description: null, image: null, ordre: n + 1, actif: true, ...stamp(since) };
+      const doc: Doc = { _id: new Types.ObjectId(), familleId: f._id, nom: `${f.nom} — sélection ${n + 1}`, description: null, image: null, ordre: n + 1, actif: true, etape: Etape.TRANSVERSE, ...stamp(since) };
       categories.push(doc);
       categoryThemes.set(String(doc._id), pool.length ? pool : THEMES);
     }
@@ -191,7 +198,7 @@ export function expandCatalog(base: SeedData, opts: VolumeOptions, now: Date, pa
       const [nom, images] = domain.categories[n % domain.categories.length]!;
       const doc: Doc = {
         _id: new Types.ObjectId(), familleId: f._id, nom: n < domain.categories.length ? nom : `${nom} ${Math.floor(n / domain.categories.length) + 1}`,
-        description: null, image: null, ordre: n + 1, actif: true, ...stamp(since),
+        description: null, image: null, ordre: n + 1, actif: true, etape: domain.etape, ...stamp(since),
       };
       categories.push(doc);
       categoryThemes.set(String(doc._id), images.map((img) => themeByImage.get(img)!));
@@ -247,7 +254,18 @@ export function expandCatalog(base: SeedData, opts: VolumeOptions, now: Date, pa
   for (const c of categories) if (!firstCategorie.has(String(c.familleId))) firstCategorie.set(String(c.familleId), c);
   for (const f of familles) if (!f.image) f.image = firstCategorie.get(String(f._id))?.image ?? null;
 
-  return { familles, categories, sousCategories, shops, users, logins, rayons };
+  // Les règles « acheté avec » sur tout le catalogue : un rayon de ciment
+  // pointe vers un rayon de sable de la même famille quand il en existe un.
+  const familleOfCategorie = new Map(categories.map((c) => [String(c._id), c.familleId as Types.ObjectId]));
+  const complementarites = complementaritesParRegles(
+    rayons.map((r) => ({
+      sousId: r.sous._id, categorieId: r.sous.categorieId as Types.ObjectId,
+      familleId: familleOfCategorie.get(String(r.sous.categorieId))!, articles: [r.theme.image],
+    })),
+    since
+  );
+
+  return { familles, categories, sousCategories, complementarites, shops, users, logins, rayons };
 }
 
 /**

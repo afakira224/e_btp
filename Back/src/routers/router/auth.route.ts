@@ -7,6 +7,7 @@ import {
   login,
   me,
   updateMe,
+  updateProjet,
   changePassword,
   forgotPassword,
   resetPassword,
@@ -19,6 +20,7 @@ import {
   registerForm,
   loginForm,
   updateForm,
+  projetForm,
   forgotPasswordForm,
   resetPasswordForm,
   changePasswordForm,
@@ -279,6 +281,43 @@ authRouter.get("/me", requireAuth, me);
  *             schema: { $ref: '#/components/schemas/BaseError' }
  */
 authRouter.put("/me", requireAuth, updateForm, updateMe);
+
+/**
+ * @swagger
+ * /auth/me/projet:
+ *   put:
+ *     tags: [Auth]
+ *     summary: Décrire ou modifier son projet (personnalisation)
+ *     description: |
+ *       Types de projet et avancement du chantier. Un projet vide efface la
+ *       réponse. Les mêmes champs sont acceptés à l'inscription (`projet`).
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               types:
+ *                 type: array
+ *                 items: { type: string, enum: [construction, renovation, salle_de_bain_cuisine, electricite_plomberie, peinture_finitions, professionnel] }
+ *               avancement:
+ *                 type: string
+ *                 nullable: true
+ *                 enum: [pas_commence, gros_oeuvre, reseaux, revetements, finitions]
+ *     responses:
+ *       200:
+ *         description: Projet enregistré (profil renvoyé)
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/BaseSuccess' }
+ *       422:
+ *         description: Valeurs invalides
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/BaseError' }
+ */
+authRouter.put("/me/projet", requireAuth, projetForm, updateProjet);
 
 /**
  * @swagger

@@ -55,6 +55,7 @@ import {
   resendVerification,
   resetPassword,
   updateMe,
+  updateProjet,
   verifyEmail,
 } from "../../../src/controllers/authController.controller.js";
 import { mockQuery } from "../../helpers/model.mock.js";
@@ -177,6 +178,25 @@ describe("register", () => {
     expect(res.body.data).toBeNull();
     expect(res.body.message).toContain("Vérifie ton email");
     expect(session.commitTransaction).toHaveBeenCalled();
+  });
+
+  it("enregistre le projet décrit à l'inscription", async () => {
+    await register(
+      mockRequest({ body: body({ projet: { types: ["construction", "construction"], avancement: "gros_oeuvre" } }) }),
+      mockResponse()
+    );
+
+    expect(UserMock.create.mock.calls[0]![0][0].projet).toMatchObject({
+      types: ["construction"],
+      avancement: "gros_oeuvre",
+      renseigneLe: expect.any(Date),
+    });
+  });
+
+  it("n'enregistre aucun projet quand le client passe la question", async () => {
+    await register(mockRequest({ body: body({ projet: { types: [], avancement: null } }) }), mockResponse());
+
+    expect(UserMock.create.mock.calls[0]![0][0].projet).toBeNull();
   });
 
   it("ne stocke jamais le mot de passe sur le profil utilisateur", async () => {
@@ -504,6 +524,59 @@ describe("updateMe", () => {
     const res = mockResponse();
 
     await updateMe(authed(oid().toString(), { body: { nom: "Bah" } }), res);
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ─────────────────────────────────────────────
+describe("updateProjet", () => {
+  it("enregistre le projet du porteur de la session", async () => {
+    const user = makeUser();
+    UserMock.findByIdAndUpdate.mockReturnValue(mockQuery(user));
+    const id = String(user._id);
+    const res = mockResponse();
+
+    await updateProjet(authed(id, { body: { types: ["renovation"], avancement: "revetements" } }), res);
+
+    expect(UserMock.findByIdAndUpdate).toHaveBeenCalledWith(
+      id,
+      { projet: expect.objectContaining({ types: ["renovation"], avancement: "revetements" }) },
+      expect.objectContaining({ new: true })
+    );
+    expect(res.body.message).toBe("Projet enregistré.");
+  });
+
+  it("un projet vide efface la réponse", async () => {
+    UserMock.findByIdAndUpdate.mockReturnValue(mockQuery(makeUser()));
+
+    await updateProjet(authed(oid().toString(), { body: {} }), mockResponse());
+
+    expect(UserMock.findByIdAndUpdate.mock.calls[0]![1]).toEqual({ projet: null });
+  });
+
+  it("renvoie 422 quand la validation échoue", async () => {
+    failValidation(["Type de projet invalide."]);
+    const res = mockResponse();
+
+    await updateProjet(authed(oid().toString(), { body: { types: ["chateau"] } }), res);
+
+    expect(res.statusCode).toBe(422);
+    expect(UserMock.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 401 sans session", async () => {
+    const res = mockResponse();
+
+    await updateProjet(mockRequest({ body: { types: ["renovation"] } }), res);
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("renvoie 404 quand le profil n'existe plus", async () => {
+    const res = mockResponse();
+
+    await updateProjet(authed(oid().toString(), { body: { types: ["renovation"] } }), res);
 
     expect(res.statusCode).toBe(404);
   });

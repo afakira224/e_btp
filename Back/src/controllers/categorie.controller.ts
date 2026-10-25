@@ -82,7 +82,7 @@ export const createCategorie = async (req: Request, res: Response) => {
       return res.status(422).json(response);
     }
 
-    const { familleId, nom, description, ordre, actif } = req.body;
+    const { familleId, nom, description, ordre, actif, etape } = req.body;
 
     logger.info(`Création catégorie : ${nom} (famille ${familleId})`);
 
@@ -114,7 +114,7 @@ export const createCategorie = async (req: Request, res: Response) => {
     const image = file ? getFileUrl(file.path) : (req.body.image ?? null);
 
     const [categorie] = await Categorie.create(
-      [{ familleId, nom, description, image, ordre: finalOrdre, actif: actif ?? true }],
+      [{ familleId, nom, description, image, ordre: finalOrdre, actif: actif ?? true, ...(etape ? { etape } : {}) }],
       { session }
     );
 
@@ -155,7 +155,7 @@ export const updateCategorie = async (req: Request, res: Response) => {
     }
 
     const id = String(req.params.id);
-    const { familleId, nom, description, image, ordre, actif } = req.body;
+    const { familleId, nom, description, image, ordre, actif, etape } = req.body;
     const removeImage = req.body.removeImage === "true" || req.body.removeImage === true;
 
     logger.info(`Mise à jour catégorie : ${id}`);
@@ -200,6 +200,7 @@ export const updateCategorie = async (req: Request, res: Response) => {
     if (description !== undefined) categorie.description = description;
     if (ordre !== undefined) categorie.ordre = ordre;
     if (actif !== undefined) categorie.actif = actif;
+    if (etape !== undefined) categorie.etape = etape;
 
     // Gestion de l'image : un nouveau fichier remplace l'ancien ; removeImage la supprime.
     if (file) {

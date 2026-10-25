@@ -2,6 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "back",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "Back",
+        "run",
+        "dev"
+      ],
+      "port": 5000
+    },
+    {
       "name": "front_web",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

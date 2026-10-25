@@ -13,13 +13,14 @@ export const familles = [
   { key: "equipement", nom: "Équipement", description: "Outillage, sécurité et second œuvre.", ordre: 2 },
 ] as const;
 
+/** `etape` : moment du chantier où l'on en a besoin (personnalisation « suite de votre chantier »). */
 export const categories = [
-  { key: "gros-oeuvre", famille: "materiaux", nom: "Gros œuvre", description: "Ciment, agrégats, fer à béton", ordre: 1 },
-  { key: "revetement", famille: "materiaux", nom: "Revêtement", description: "Carrelage, faïence, parquet", ordre: 2 },
-  { key: "peinture", famille: "materiaux", nom: "Peinture", description: "Intérieur, façade, enduits", ordre: 3 },
-  { key: "plomberie", famille: "equipement", nom: "Plomberie", description: "Tuyauterie, raccords, sanitaire", ordre: 4 },
-  { key: "electricite", famille: "equipement", nom: "Électricité", description: "Câbles, tableaux, appareillage", ordre: 5 },
-  { key: "outillage", famille: "equipement", nom: "Outillage", description: "Électroportatif et main", ordre: 6 },
+  { key: "gros-oeuvre", famille: "materiaux", nom: "Gros œuvre", description: "Ciment, agrégats, fer à béton", ordre: 1, etape: "gros_oeuvre" },
+  { key: "revetement", famille: "materiaux", nom: "Revêtement", description: "Carrelage, faïence, parquet", ordre: 2, etape: "revetements" },
+  { key: "peinture", famille: "materiaux", nom: "Peinture", description: "Intérieur, façade, enduits", ordre: 3, etape: "finitions" },
+  { key: "plomberie", famille: "equipement", nom: "Plomberie", description: "Tuyauterie, raccords, sanitaire", ordre: 4, etape: "reseaux" },
+  { key: "electricite", famille: "equipement", nom: "Électricité", description: "Câbles, tableaux, appareillage", ordre: 5, etape: "reseaux" },
+  { key: "outillage", famille: "equipement", nom: "Outillage", description: "Électroportatif et main", ordre: 6, etape: "transverse" },
 ] as const;
 
 export const sousCategories = [
@@ -145,6 +146,9 @@ export const promotions = [
 
 /** Compte client de démonstration (identifiants de développement uniquement). */
 export const demoCustomer = { prenom: "Mamadou", nom: "Diallo", email: "mamadou@btp.com", telephone: "620000000" } as const;
+
+/** Projet décrit par le client de démonstration à son inscription. */
+export const demoProjet = { types: ["construction"], avancement: "gros_oeuvre" } as const;
 
 export const demoAddresses = [
   { key: "maison", label: "Maison", destinataire: "Mamadou Diallo", telephone: "620000000", adresse: "Quartier Kipé, rue KA-028, villa 12", ville: "Conakry", commune: "Ratoma", isDefault: true },

@@ -1,5 +1,6 @@
 import { body, type ValidationChain, param } from "express-validator";
 import { EntityType } from "../../models/user.model.js";
+import { AvancementChantier, TypeProjet } from "../../models/projet.model.js";
 
 // ─────────────────────────────────────────────
 //  REGISTER  →  RegisterDto
@@ -37,7 +38,31 @@ export const registerForm: ValidationChain[] = [
   body("role")
     .notEmpty().withMessage("Le rôle est requis.")
     .isIn(Object.values(EntityType)).withMessage(`Rôle invalide. Valeurs acceptées : ${Object.values(EntityType).join(", ")}.`),
+
+  // Projet : facultatif à l'inscription (le client peut passer la question).
+  body("projet").optional({ values: "null" }).isObject().withMessage("Le projet doit être un objet."),
+  ...projetRules("projet."),
 ];
+
+// ─────────────────────────────────────────────
+//  PROJET  →  ProjetDto
+//  { types?: TypeProjet[], avancement?: AvancementChantier | null }
+//  Utilisé à l'inscription (champ « projet ») et par PUT /auth/me/projet.
+// ─────────────────────────────────────────────
+function projetRules(prefix: string): ValidationChain[] {
+  return [
+    body(`${prefix}types`)
+      .optional()
+      .isArray({ max: Object.values(TypeProjet).length }).withMessage("Les types de projet doivent être une liste."),
+    body(`${prefix}types.*`)
+      .isIn(Object.values(TypeProjet)).withMessage(`Type de projet invalide. Valeurs acceptées : ${Object.values(TypeProjet).join(", ")}.`),
+    body(`${prefix}avancement`)
+      .optional({ values: "null" })
+      .isIn(Object.values(AvancementChantier)).withMessage(`Avancement invalide. Valeurs acceptées : ${Object.values(AvancementChantier).join(", ")}.`),
+  ];
+}
+
+export const projetForm: ValidationChain[] = projetRules("");
 
 // ─────────────────────────────────────────────
 //  LOGIN  →  LoginDto

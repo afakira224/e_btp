@@ -4,8 +4,13 @@ import { Section } from "../../../home/shared";
 import { fetchCategories, useResource } from "../../shared";
 import styles from "./CategoryGrid.module.css";
 
+// Un aperçu, pas le catalogue : 6 remplit la grille à 6, 3 ou 2 colonnes.
+// Les autres sont sur /categories (« Toutes les catégories »).
+const APERCU = 6;
+
 export const CategorySection = () => {
   const { data, isLoading, error } = useResource(fetchCategories, []);
+  const apercu = data.slice(0, APERCU);
 
   return (
     <Section
@@ -18,7 +23,7 @@ export const CategorySection = () => {
       skeleton={{ count: 6, height: 184, columns: "repeat(6, 1fr)" }}
     >
       <div className={styles.grid}>
-        {data.map((categorie) => (
+        {apercu.map((categorie) => (
           <Link
             key={categorie.id}
             className={styles.tile}

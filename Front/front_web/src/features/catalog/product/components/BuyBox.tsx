@@ -11,7 +11,12 @@ import {
   isOutOfStock,
   type ProductBoutique,
 } from "../../../../entities/product";
-import { DELIVERY_MODE_LABELS, formatFee } from "../../../../entities/delivery";
+import {
+  DELIVERY_MODE_BUYER_HINTS,
+  DELIVERY_MODE_LABELS,
+  DeliveryMode,
+  formatFee,
+} from "../../../../entities/delivery";
 import { useAuth } from "../../../auth";
 import { useCart } from "../../../cart";
 import styles from "./ProductDetail.module.css";
@@ -92,16 +97,34 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
       </span>
 
       {/* Modes effectifs du produit — ceux de la boutique ou les siens.
-          Les frais définitifs sont calculés au panier, par boutique. */}
+          Les frais définitifs sont calculés au panier, par boutique.
+          Le retrait montre l'adresse de la boutique, jamais son téléphone. */}
       {item.delivery && item.delivery.options.length > 0 ? (
-        <ul className={styles.delivery} aria-label="Modes de livraison">
-          {item.delivery.options.map((option) => (
-            <li key={option.method}>
-              <span>{DELIVERY_MODE_LABELS[option.method]}</span>
-              <span className={styles.deliveryFee}>{formatFee(option.fee)}</span>
-            </li>
-          ))}
-        </ul>
+        <section className={styles.delivery} aria-labelledby="livraison-titre">
+          <h2 id="livraison-titre" className={styles.deliveryTitle}>
+            Livraison
+          </h2>
+          <ul className={styles.deliveryList}>
+            {item.delivery.options.map((option) => (
+              <li key={option.method} className={styles.deliveryOption}>
+                <span className={styles.deliveryHead}>
+                  <span className={styles.deliveryLabel}>
+                    {DELIVERY_MODE_LABELS[option.method]}
+                  </span>
+                  <span className={styles.deliveryFee}>{formatFee(option.fee)}</span>
+                </span>
+                <span className={styles.deliveryHint}>
+                  {option.method === DeliveryMode.PICKUP && item.boutique?.adresse
+                    ? `À retirer chez ${item.boutique.nom} : ${item.boutique.adresse}.`
+                    : DELIVERY_MODE_BUYER_HINTS[option.method]}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {item.delivery.options.length > 1 ? (
+            <p className={styles.deliveryNote}>Vous choisirez le mode au panier.</p>
+          ) : null}
+        </section>
       ) : null}
 
       <div className={styles.actions}>

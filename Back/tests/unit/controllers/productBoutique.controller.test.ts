@@ -64,7 +64,7 @@ import {
   updateProductBoutique,
 } from "../../../src/controllers/productBoutique.controller.js";
 import { mockQuery } from "../../helpers/model.mock.js";
-import { mockRequest, mockResponse, mockSession } from "../../helpers/express.mock.js";
+import { mockExpressSession, mockRequest, mockResponse, mockSession } from "../../helpers/express.mock.js";
 import { makeProduct, makeProductBoutique, makeShop, oid } from "../../helpers/factories.js";
 
 // Les écritures d'offres exigent un gérant de la boutique ou un admin
@@ -238,10 +238,21 @@ describe("getProductBoutiqueById", () => {
     expect(res.body.message).toBe("Produit non trouvé");
   });
 
-  it("n'enregistre aucune vue sans userId", async () => {
+  it("n'enregistre aucune vue hors session", async () => {
     PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
 
     await getProductBoutiqueById(mockRequest({ params: { id: oid().toString() } }), mockResponse());
+
+    expect(RecentlyViewedMock.findOne).not.toHaveBeenCalled();
+  });
+
+  it("ignore un userId passé dans l'URL (on n'écrit pas chez un autre client)", async () => {
+    PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
+
+    await getProductBoutiqueById(
+      mockRequest({ params: { id: oid().toString() }, query: { userId: oid().toString() } }),
+      mockResponse()
+    );
 
     expect(RecentlyViewedMock.findOne).not.toHaveBeenCalled();
   });
@@ -253,7 +264,7 @@ describe("getProductBoutiqueById", () => {
     const userId = oid().toString();
 
     await getProductBoutiqueById(
-      mockRequest({ params: { id: pb._id.toString() }, query: { userId } }),
+      mockRequest({ params: { id: pb._id.toString() }, session: mockExpressSession({ id: userId, entityType: "user" }) }),
       mockResponse()
     );
 
@@ -271,7 +282,7 @@ describe("getProductBoutiqueById", () => {
     RecentlyViewedMock.findOne.mockReturnValue(mockQuery(rv));
 
     await getProductBoutiqueById(
-      mockRequest({ params: { id: pb._id.toString() }, query: { userId: oid().toString() } }),
+      mockRequest({ params: { id: pb._id.toString() }, session: mockExpressSession({ id: oid().toString(), entityType: "user" }) }),
       mockResponse()
     );
 
@@ -291,7 +302,7 @@ describe("getProductBoutiqueById", () => {
     RecentlyViewedMock.findOne.mockReturnValue(mockQuery(rv));
 
     await getProductBoutiqueById(
-      mockRequest({ params: { id: pb._id.toString() }, query: { userId: oid().toString() } }),
+      mockRequest({ params: { id: pb._id.toString() }, session: mockExpressSession({ id: oid().toString(), entityType: "user" }) }),
       mockResponse()
     );
 
@@ -309,7 +320,7 @@ describe("getProductBoutiqueById", () => {
     RecentlyViewedMock.findOne.mockReturnValue(mockQuery(rv));
 
     await getProductBoutiqueById(
-      mockRequest({ params: { id: pb._id.toString() }, query: { userId: oid().toString() } }),
+      mockRequest({ params: { id: pb._id.toString() }, session: mockExpressSession({ id: oid().toString(), entityType: "user" }) }),
       mockResponse()
     );
 
@@ -798,6 +809,15 @@ describe("searchProductBoutiques", () => {
 
     expect(PbMock.estimatedDocumentCount).toHaveBeenCalled();
     expect(PbMock.countDocuments).not.toHaveBeenCalled();
+  });
+
+  it("« en promotion » écarte les offres sans remise (null < prix pour MongoDB)", async () => {
+    await searchProductBoutiques(mockRequest({ query: { discounted: "true" } }), mockResponse());
+
+    expect(PbMock.countDocuments).toHaveBeenCalledWith({
+      discountPrice: { $ne: null },
+      $expr: { $lt: ["$discountPrice", "$price"] },
+    });
   });
 
   it("avec un filtre, compte exactement les résultats", async () => {

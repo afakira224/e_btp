@@ -1,4 +1,5 @@
 import { body, type ValidationChain } from "express-validator";
+import { Etape } from "../../models/projet.model.js";
 
 // { familleId, nom, description, image, ordre, actif }
 export const createCategorieForm: ValidationChain[] = [
@@ -25,6 +26,10 @@ export const createCategorieForm: ValidationChain[] = [
     .optional()
     .isInt().withMessage("L'ordre doit être un nombre entier.")
     .toInt(),
+
+  body("etape")
+    .optional()
+    .isIn(Object.values(Etape)).withMessage(`Étape invalide. Valeurs acceptées : ${Object.values(Etape).join(", ")}.`),
 
   body("actif")
     .optional()
@@ -58,6 +63,10 @@ export const updateCategorieForm: ValidationChain[] = [
     .optional()
     .isInt().withMessage("L'ordre doit être un nombre entier.")
     .toInt(),
+
+  body("etape")
+    .optional()
+    .isIn(Object.values(Etape)).withMessage(`Étape invalide. Valeurs acceptées : ${Object.values(Etape).join(", ")}.`),
 
   body("actif")
     .optional()

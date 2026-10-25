@@ -83,6 +83,43 @@
   white-space: nowrap;
 }
 
+/* ── Livraison et quantité, côte à côte ─────── */
+.lineActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.deliverySelect {
+  height: 38px;
+  max-width: 260px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.deliverySelect:hover:not(:focus):not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.deliverySelect:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.deliverySelect:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 /* ── Sélecteur de quantité ──────────────────── */
 .quantity {
   display: inline-flex;
@@ -200,6 +237,45 @@
   color: var(--color-text);
 }
 
+/* Une livraison par boutique, choisie sur les lignes. */
+.shipments {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shipment {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+
+.shipmentHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.shipmentShop {
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.shipmentMode {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.shipmentError {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
 .actions {
   display: grid;
   gap: var(--space-3);
@@ -249,5 +325,19 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  /* Total et « Retirer » sur une ligne, livraison et quantité dessous. */
+  .lineActions {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .deliverySelect {
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 0;
   }
 }

@@ -123,6 +123,7 @@ class MockApiClient implements ApiClient {
     if (m(r'PUT /cart/([^/]+)/items/([^/]+)') case final r?) return _updateCartItem(g(r, 1), g(r, 2), body);
     if (m(r'DELETE /cart/([^/]+)/items/([^/]+)') case final r?) return _removeCartItem(g(r, 1), g(r, 2));
     if (m(r'POST /cart/([^/]+)/items') case final r?) return _addToCart(g(r, 1), body);
+    if (m(r'POST /cart/([^/]+)/delivery-quote') case final r?) return _deliveryQuote(g(r, 1), body);
     if (m(r'GET /cart/([^/]+)') case final r?) return _getCart(g(r, 1));
     if (m(r'DELETE /cart/([^/]+)') case final r?) return _clearCart(g(r, 1));
 
@@ -515,6 +516,82 @@ class MockApiClient implements ApiClient {
     cart['items'] = <Map<String, dynamic>>[];
     _touch(cart);
     return _ok(_cartDto(cart), 'Panier vidé avec succès');
+  }
+
+  // ── Devis de livraison ────────────────────────
+  // Même règle que Back/src/shared/helpers/delivery.helper.ts (quoteDelivery) :
+  // une livraison par boutique, les modes que tous ses articles acceptent, le
+  // prix fixe le plus élevé de ses articles. Les boutiques du jeu simulé n'ont
+  // pas de réglages : elles ont ceux du back pour une boutique jamais configurée.
+  static const _modes = ['pickup', 'free', 'flat_rate'];
+  static const _labels = {'pickup': 'Retrait en boutique', 'free': 'Livraison gratuite', 'flat_rate': 'Livraison à prix fixe'};
+  static const _defaultDelivery = {'modes': ['pickup', 'flat_rate'], 'flatRateFee': 25000};
+
+  /// Réglages effectifs d'une offre : les siens, ou ceux de sa boutique.
+  Map<String, dynamic> _effectiveDelivery(J offer) {
+    final own = offer['delivery'] as Map?;
+    final settings = own != null && own['useShopSettings'] == false
+        ? own
+        : ((offer['boutique'] as Map?)?['delivery'] as Map?) ?? _defaultDelivery;
+    final modes = _modes.where(((settings['modes'] as List?) ?? const []).contains).toList();
+    return {'modes': modes, 'flatRateFee': modes.contains('flat_rate') ? settings['flatRateFee'] : null};
+  }
+
+  ApiResponse _deliveryQuote(String userId, J body) {
+    _requireSelf(userId);
+    final cart = _cartDto(_cartOf(userId));
+    final lines = (cart['items'] as List).cast<Map<String, dynamic>>();
+    final requested = <String, String>{
+      for (final d in (body['deliveries'] as List? ?? const []))
+        if (d is Map) (d['boutiqueId'] as String? ?? ''): (d['method'] as String? ?? ''),
+    };
+
+    final byShop = <String, List<J>>{};
+    for (final line in lines) {
+      final offer = _offers.where((o) => o['id'] == line['productBoutiqueId']).firstOrNull;
+      final shopId = (offer?['boutique'] as Map?)?['id'] as String? ?? '';
+      byShop.putIfAbsent(shopId, () => []).add({...line, 'offer': offer});
+    }
+
+    final groups = byShop.entries.map((entry) {
+      final shop = (entry.value.first['offer'] as Map?)?['boutique'] as Map?;
+      final nom = shop?['nom'] as String? ?? 'cette boutique';
+      final base = <String, dynamic>{
+        'boutiqueId': entry.key,
+        'boutiqueNom': shop?['nom'],
+        'pickupAdresse': shop?['adresse'],
+        'items': [
+          for (final l in entry.value) {'productBoutiqueId': l['productBoutiqueId'], 'productName': l['productName'], 'quantity': l['quantity']},
+        ],
+        'options': <J>[],
+        'selectedMethod': null,
+        'fee': null,
+      };
+      if (shop == null) return {...base, 'error': "Cette boutique n'est plus disponible : retirez ses articles du panier."};
+
+      final effective = entry.value.map((l) => _effectiveDelivery(l['offer'] as J)).toList();
+      final common = _modes.where((mode) => effective.every((d) => (d['modes'] as List).contains(mode))).toList();
+      final flatRate = effective.map((d) => (d['flatRateFee'] as num?) ?? 0).fold<num>(0, (a, b) => a > b ? a : b);
+      final options = [for (final mode in common) {'method': mode, 'fee': mode == 'flat_rate' ? flatRate : 0}];
+      if (options.isEmpty) return {...base, 'error': "Les articles de $nom n'ont aucun mode de livraison en commun : commandez-les séparément."};
+
+      final chosen = requested[entry.key] ?? (options.length == 1 ? options.first['method'] as String : null);
+      if (chosen == null) return {...base, 'options': options, 'error': 'Choisissez un mode de livraison pour $nom.'};
+      final option = options.where((o) => o['method'] == chosen).firstOrNull;
+      if (option == null) return {...base, 'options': options, 'error': "« ${_labels[chosen] ?? chosen} » n'est pas proposé par $nom pour ces articles."};
+      return {...base, 'options': options, 'selectedMethod': chosen, 'fee': option['fee']};
+    }).toList();
+
+    final shippingFee = groups.fold<num>(0, (sum, g) => sum + ((g['fee'] as num?) ?? 0));
+    final subtotal = cart['totalAmount'] as num;
+    return _ok({
+      'groups': groups,
+      'shippingFee': shippingFee,
+      'ready': groups.isNotEmpty && groups.every((g) => g['selectedMethod'] != null && g['error'] == null),
+      'currency': 'GNF',
+      'subtotal': subtotal,
+      'total': subtotal + shippingFee,
+    }, 'Devis de livraison calculé');
   }
 
   // ── Favoris ───────────────────────────────────

@@ -1,4 +1,5 @@
 import type { EntityType } from "../../models/user.model.js";
+import type { ProjetDto } from "../helpers/projet.helper.js";
 
 // ─────────────────────────────────────────────
 //  REGISTER
@@ -10,6 +11,8 @@ export interface RegisterDto {
   telephone:       string;
   password:        string;
   role:            EntityType;
+  /** Facultatif : le client peut passer la question à l'inscription. */
+  projet?:         ProjetDto | null | undefined;
 }
 
 // ─────────────────────────────────────────────

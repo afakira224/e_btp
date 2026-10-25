@@ -12,6 +12,7 @@ import promotionRouter from './router/promotion.route.js';
 import wishlistRouter from './router/wishlist.route.js';
 import reviewRouter from './router/review.route.js';
 import addressRouter from './router/address.route.js';
+import recommandationRouter from './router/recommandation.route.js';
 
 const mainRouter = express.Router();
 
@@ -29,6 +30,7 @@ mainRouter.use('/promotions', promotionRouter);
 mainRouter.use('/wishlist', wishlistRouter);
 mainRouter.use('/reviews', reviewRouter);
 mainRouter.use('/addresses', addressRouter);
+mainRouter.use('/recommandations', recommandationRouter);
 
 
 

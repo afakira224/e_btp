@@ -1,5 +1,6 @@
 import mongoose, { Document, Model, Schema, Types } from "mongoose";
 import bcrypt from "bcryptjs";
+import { projetSchema, type IProjet } from "./projet.model.js";
 
 // ─────────────────────────────────────────────
 //  USER
@@ -12,6 +13,8 @@ export interface IUser extends Document {
   avatar?: string | null;
   role: EntityType;
   isEmailVerified: boolean;
+  /** Projet déclaré à l'inscription ou dans le profil ; null s'il n'a rien dit. */
+  projet?: IProjet | null;
 }
 
 // ─────────────────────────────────────────────
@@ -33,6 +36,7 @@ const userSchema = new Schema<IUser>(
     avatar:    { type: String, default: null },
     role:      { type: String, enum: Object.values(EntityType), default: EntityType.USER },
     isEmailVerified: { type: Boolean, default: false },
+    projet:    { type: projetSchema, default: null },
   },
   { timestamps: true }
 );

@@ -12,6 +12,7 @@ import { toProductBoutiqueResponseDto, type ProductBoutiqueResponseDto } from ".
 import { getFileUrl, deleteFileByUrl, cleanupUploadedFiles } from "../shared/helpers/fileUpload.js";
 import { RecentlyViewed } from "../models/recentlyViewed.model.js";
 import { type IProductBoutique } from "../models/product.model.js";
+import { enrichProductBoutiques } from "../shared/helpers/productBoutique.helper.js";
 import { EntityType } from "../models/user.model.js";
 import type { IProductDelivery } from "../models/delivery.model.js";
 import { buildProductDelivery, type ProductDeliveryInput } from "../shared/helpers/delivery.helper.js";
@@ -21,39 +22,6 @@ const OFFER_FORBIDDEN_MESSAGE = "Vous ne pouvez gérer que les produits de vos p
 
 // Nombre maximum de produits conservés dans l'historique "récemment vus" par utilisateur.
 const MAX_RECENTLY_VIEWED = 20;
-
-// Enrichit une liste de product_boutique en DTOs (boutique, produit, taxonomie).
-const enrichProductBoutiques = async (
-  items: IProductBoutique[]
-): Promise<ProductBoutiqueResponseDto[]> => {
-  const shopIds = [...new Set(items.map(i => i.boutiqueId?.toString()).filter(Boolean))];
-  const productIds = [...new Set(items.map(i => i.productId?.toString()).filter(Boolean))];
-
-  const [shops, products] = await Promise.all([
-    Shop.find({ _id: { $in: shopIds } }),
-    Product.find({ _id: { $in: productIds } }),
-  ]);
-
-  const familleIds = [...new Set(products.map(p => p.familleId?.toString()).filter(Boolean))];
-  const categoryIds = [...new Set(products.map(p => p.categoryId?.toString()).filter(Boolean))];
-  const sousCategoryIds = [...new Set(products.map(p => p.sousCategoryId?.toString()).filter(Boolean))];
-
-  const [familles, categories, sousCategories] = await Promise.all([
-    Famille.find({ _id: { $in: familleIds } }),
-    Categorie.find({ _id: { $in: categoryIds } }),
-    SousCategorie.find({ _id: { $in: sousCategoryIds } }),
-  ]);
-
-  return items.map(item => {
-    const shop = item.boutiqueId
-      ? shops.find(s => s._id.toString() === item.boutiqueId.toString())
-      : undefined;
-    const product = item.productId
-      ? products.find(p => p._id.toString() === item.productId.toString())
-      : undefined;
-    return toProductBoutiqueResponseDto(item, shop ?? undefined, product ?? undefined, familles, categories, sousCategories);
-  });
-};
 
 // Enregistre (best-effort) la consultation d'un produit par un utilisateur.
 // Non bloquant : une erreur ici ne doit jamais casser la réponse principale.
@@ -179,10 +147,12 @@ export const getProductBoutiqueById = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Historique "récemment vu" : enregistré si un userId est fourni (best-effort).
-    const viewerId = req.query.userId as string | undefined;
+    // Historique « récemment vus » du client connecté (best-effort). L'identité
+    // vient de la session : un userId passé dans l'URL permettrait d'écrire
+    // dans l'historique d'un autre client.
+    const viewerId = req.session?.user?.id;
     if (viewerId) {
-      await recordProductView(viewerId, String(id));
+      await recordProductView(String(viewerId), String(id));
     }
 
     const product = await Product.findById(item.productId);
@@ -683,7 +653,13 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
     if (isFeatured !== undefined) pbFilter.isFeatured = isFeatured === "true";
     if (tags) pbFilter.tags = { $in: tags.split(",").map(t => t.trim()).filter(Boolean) };
     // Produits en promo : prix remisé strictement inférieur au prix.
-    if (discounted === "true") pbFilter.$expr = { $lt: ["$discountPrice", "$price"] };
+    if (discounted === "true") {
+      // Une remise existe ET elle est inférieure au prix. Sans le premier
+      // test, `null < prix` serait vrai : toutes les offres sans remise
+      // passeraient le filtre.
+      pbFilter.discountPrice = { $ne: null };
+      pbFilter.$expr = { $lt: ["$discountPrice", "$price"] };
+    }
 
     // Tri
     const sortMap: Record<string, Record<string, 1 | -1>> = {

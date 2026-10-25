@@ -7,6 +7,7 @@ import { DB_CONNECT } from "../db/db.js";
 import { Address } from "../models/address.model.js";
 import { Cart } from "../models/cart.model.js";
 import { Categorie } from "../models/categorie.model.js";
+import { Complementarite } from "../models/complementarite.model.js";
 import { Famille } from "../models/famille.model.js";
 import { Order } from "../models/order.model.js";
 import { Product, productBoutique } from "../models/product.model.js";
@@ -51,6 +52,7 @@ const plan: [keyof SeedData, Model<any>][] = [
   ["familles", Famille],
   ["categories", Categorie],
   ["sousCategories", SousCategorie],
+  ["complementarites", Complementarite],
   ["shops", Shop],
   ["products", Product],
   ["productBoutiques", productBoutique],
@@ -151,6 +153,7 @@ async function main() {
       familles: catalog.familles,
       categories: catalog.categories,
       sousCategories: catalog.sousCategories,
+      complementarites: catalog.complementarites,
       shops: catalog.shops,
       users: catalog.users,
       logins: catalog.logins,

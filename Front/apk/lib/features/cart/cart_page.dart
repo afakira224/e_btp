@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/navigation.dart';
 import '../../app/theme/tokens.dart';
 import '../../entities/cart.dart';
+import '../../entities/delivery.dart';
 import '../../shared/api/api_exception.dart';
 import '../../shared/ui/alert_banner.dart';
 import '../../shared/ui/kit.dart';
@@ -14,9 +15,12 @@ import '../../shared/ui/states.dart';
 import '../../shared/ui/thumbnail.dart';
 import '../../shared/utils/format.dart';
 import 'shared/cart_controller.dart';
+import 'shared/delivery_controller.dart';
 
 // ─────────────────────────────────────────────
 //  Panier — balayer une ligne vers la gauche la retire, avec « Annuler ».
+//  Chaque ligne choisit sa livraison à côté de la quantité ; le mode est
+//  celui de la boutique, partagé par toutes ses lignes.
 //  « Passer commande » reste désactivé, comme sur le web : le tunnel de
 //  commande n'existe pas encore côté front (point ouvert du cahier).
 // ─────────────────────────────────────────────
@@ -60,10 +64,29 @@ class _CartPageState extends ConsumerState<CartPage> {
   @override
   Widget build(BuildContext context) {
     final cart = ref.watch(cartProvider);
+    final quoteAsync = ref.watch(deliveryQuoteProvider);
+    // Pendant un recalcul, le devis précédent reste affiché.
+    final quote = quoteAsync.value;
+    final quoting = quoteAsync.isLoading;
     final t = context.tokens;
 
+    // Par défaut, chaque boutique prend le premier mode que ses produits
+    // proposent (celui du produit quand il n'en a qu'un).
+    ref.listen(deliveryQuoteProvider, (_, next) {
+      final q = next.value;
+      if (q == null) return;
+      final selection = ref.read(deliverySelectionProvider.notifier);
+      selection.keepOnly(q.groups.map((g) => g.boutiqueId).toSet());
+      final chosen = ref.read(deliverySelectionProvider);
+      for (final g in q.groups) {
+        if (g.selectedMethod == null && chosen[g.boutiqueId] == null && g.options.isNotEmpty) {
+          selection.choose(g.boutiqueId, g.options.first.method);
+        }
+      }
+    });
+
     return Scaffold(
-      bottomNavigationBar: cart.items.isEmpty ? null : _Summary(cart: cart),
+      bottomNavigationBar: cart.items.isEmpty ? null : _Summary(cart: cart, quote: quote, quoting: quoting),
       body: RefreshIndicator(
         onRefresh: ref.read(cartProvider.notifier).refresh,
         child: CustomScrollView(slivers: [
@@ -125,6 +148,9 @@ class _CartPageState extends ConsumerState<CartPage> {
                     child: _Line(
                       item: item,
                       busy: _busy,
+                      delivery: quote?.groupOf(item.productBoutiqueId),
+                      deliveryBusy: quoting,
+                      onDelivery: (group, mode) => ref.read(deliverySelectionProvider.notifier).choose(group.boutiqueId, mode),
                       onQuantity: (q) => _run(() => ref.read(cartProvider.notifier).setQuantity(item.productBoutiqueId, q)),
                       onRemove: () => _remove(item),
                     ),
@@ -150,10 +176,23 @@ class _CartPageState extends ConsumerState<CartPage> {
 }
 
 class _Line extends StatelessWidget {
-  const _Line({required this.item, required this.busy, required this.onQuantity, required this.onRemove});
+  const _Line({
+    required this.item,
+    required this.busy,
+    required this.delivery,
+    required this.deliveryBusy,
+    required this.onDelivery,
+    required this.onQuantity,
+    required this.onRemove,
+  });
 
   final CartItem item;
   final bool busy;
+
+  /// Livraison de la boutique de l'article ; null avant le premier devis.
+  final DeliveryGroupQuote? delivery;
+  final bool deliveryBusy;
+  final void Function(DeliveryGroupQuote group, DeliveryMode mode) onDelivery;
   final ValueChanged<int> onQuantity;
   final VoidCallback onRemove;
 
@@ -183,7 +222,10 @@ class _Line extends StatelessWidget {
                 ),
               ),
             ]),
-            Text('${formatPrice(item.unitPrice)} l’unité', style: TextStyle(color: t.textMuted, fontSize: 12)),
+            Row(children: [
+              Expanded(child: Text('${formatPrice(item.unitPrice)} l’unité', style: TextStyle(color: t.textMuted, fontSize: 12))),
+              Text(formatPrice(item.lineTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            ]),
             if (item.isOutOfStock)
               Text('Rupture de stock', style: TextStyle(fontSize: 12, color: t.danger, fontWeight: FontWeight.w600))
             else if (item.exceedsStock)
@@ -199,9 +241,31 @@ class _Line extends StatelessWidget {
                 itemName: name,
                 onChanged: busy ? null : onQuantity,
               ),
-              const Spacer(),
-              Text(formatPrice(item.lineTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              if (delivery case final group? when group.options.isNotEmpty) ...[
+                const SizedBox(width: Space.s2),
+                Expanded(
+                  child: _DeliveryPicker(
+                    group: group,
+                    itemName: name,
+                    onChanged: busy || deliveryBusy ? null : (mode) => onDelivery(group, mode),
+                  ),
+                ),
+              ],
             ]),
+            if (delivery case final group?)
+              if (group.options.isEmpty && group.error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.s1),
+                  child: Text(group.error!, style: TextStyle(fontSize: 11.5, color: t.danger, height: 1.3)),
+                )
+              else if (group.productBoutiqueIds.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.s1),
+                  child: Text(
+                    'Même livraison pour les ${group.productBoutiqueIds.length} articles de ${group.boutiqueNom ?? 'cette boutique'}',
+                    style: TextStyle(fontSize: 11.5, color: t.textMuted, height: 1.3),
+                  ),
+                ),
           ]),
         ),
       ]),
@@ -209,25 +273,99 @@ class _Line extends StatelessWidget {
   }
 }
 
-/// Récapitulatif collé en bas d'écran.
-class _Summary extends StatelessWidget {
-  const _Summary({required this.cart});
+/// Mode de livraison d'une ligne, à côté de la quantité : libellé court dans
+/// le bouton (la place manque sur téléphone), libellé complet et frais dans
+/// le menu.
+class _DeliveryPicker extends StatelessWidget {
+  const _DeliveryPicker({required this.group, required this.itemName, required this.onChanged});
 
-  final Cart cart;
+  final DeliveryGroupQuote group;
+  final String itemName;
+  final ValueChanged<DeliveryMode>? onChanged;
+
+  String _short(DeliveryOption o) => switch (o.method) {
+        DeliveryMode.pickup => 'Retrait',
+        DeliveryMode.free => 'Gratuite',
+        DeliveryMode.flatRate => formatPrice(o.fee),
+      };
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final changed = onChanged;
+    return Semantics(
+      label: 'Livraison de $itemName',
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.only(left: Space.s2, right: Space.s1),
+        decoration: BoxDecoration(color: t.surfaceAlt, borderRadius: BorderRadius.circular(Radii.sm)),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<DeliveryMode>(
+            value: group.selectedMethod,
+            isExpanded: true,
+            isDense: true,
+            iconSize: 20,
+            borderRadius: BorderRadius.circular(Radii.sm),
+            hint: Text('Livraison', style: TextStyle(fontSize: 12.5, color: t.textMuted)),
+            onChanged: changed == null
+                ? null
+                : (mode) {
+                    if (mode != null) changed(mode);
+                  },
+            selectedItemBuilder: (_) => [
+              for (final o in group.options)
+                Row(children: [
+                  Icon(o.method == DeliveryMode.pickup ? Icons.storefront_outlined : Icons.local_shipping_outlined, size: 16, color: t.textMuted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(_short(o), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: t.text)),
+                  ),
+                ]),
+            ],
+            items: [
+              for (final o in group.options)
+                DropdownMenuItem(
+                  value: o.method,
+                  child: Row(children: [
+                    Expanded(child: Text(o.method.label, style: const TextStyle(fontSize: 14))),
+                    const SizedBox(width: Space.s3),
+                    Text(formatFee(o.fee), style: TextStyle(fontSize: 13, color: t.textMuted, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Récapitulatif collé en bas d'écran.
+class _Summary extends StatelessWidget {
+  const _Summary({required this.cart, required this.quote, required this.quoting});
+
+  final Cart cart;
+  final DeliveryQuote? quote;
+  final bool quoting;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    // Frais et total tels que le serveur les a calculés pour ce panier-ci.
+    final q = quote;
+    final current = q != null && !quoting && q.subtotal == cart.totalAmount;
+    final ready = current && q.ready;
+    final livraison = ready ? formatFee(q.shippingFee) : (current ? 'à choisir' : '…');
     return BottomActionBar(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Total', style: TextStyle(color: t.textMuted, fontSize: 13)),
-              Text(formatPrice(cart.totalAmount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.4)),
+              Text(formatPrice(ready ? q.total : cart.totalAmount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.4)),
             ]),
           ),
-          Text('Livraison calculée\nà l’étape suivante', textAlign: TextAlign.right, style: TextStyle(color: t.textMuted, fontSize: 11.5, height: 1.3)),
+          Text('Livraison\n$livraison', textAlign: TextAlign.right, style: TextStyle(color: t.textMuted, fontSize: 11.5, height: 1.3)),
         ]),
         const SizedBox(height: Space.s3),
         // La commande n'existe pas encore côté front : plutôt qu'un bouton

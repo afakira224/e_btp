@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Thumbnail } from "../../../shared/ui";
 import { ApiError } from "../../../shared/api";
@@ -18,10 +18,15 @@ import {
   CatalogSkeletons,
   EmptyState,
 } from "../../catalog/shared/components/CatalogPage";
-import { formatFee } from "../../../entities/delivery";
+import {
+  DELIVERY_MODE_LABELS,
+  DeliveryMode,
+  formatFee,
+  isDeliveryMode,
+  type DeliveryGroupQuote,
+} from "../../../entities/delivery";
 import { useCart } from "../shared/hooks/useCart";
 import { useDeliveryQuote } from "../shared/hooks/useDeliveryQuote";
-import { DeliveryChoices } from "../components/DeliveryChoices";
 import styles from "./CartPage.module.css";
 
 const CRUMBS = [{ label: "Accueil", to: "/" }, { label: "Panier" }];
@@ -32,13 +37,61 @@ const CRUMBS = [{ label: "Accueil", to: "/" }, { label: "Panier" }];
 //  deux divergent, on le dit ici plutôt que de laisser l'utilisateur le
 //  découvrir au paiement.
 // ─────────────────────────────────────────────
+// La livraison se choisit sur la ligne, mais elle est celle de la boutique :
+// ses articles partent ensemble et le prix fixe est facturé une fois. Changer
+// le mode d'une ligne change donc celui des autres lignes de la boutique.
+const LineDelivery = ({
+  item,
+  group,
+  onChoose,
+  disabled,
+}: {
+  item: CartItem;
+  group: DeliveryGroupQuote | undefined;
+  onChoose: (boutiqueId: string, method: DeliveryMode) => void;
+  disabled: boolean;
+}) => {
+  if (!group || group.options.length === 0) return null;
+  const autres = group.items.length - 1;
+
+  return (
+    <select
+      className={styles.deliverySelect}
+      value={group.selectedMethod ?? ""}
+      onChange={(event) => {
+        if (isDeliveryMode(event.target.value)) onChoose(group.boutiqueId, event.target.value);
+      }}
+      disabled={disabled}
+      aria-label={`Livraison de ${item.productName ?? "l'article"}`}
+      title={
+        autres > 0
+          ? `Même livraison pour les ${group.items.length} articles de ${group.boutiqueNom ?? "cette boutique"}`
+          : undefined
+      }
+    >
+      {group.selectedMethod === null ? (
+        <option value="" disabled>
+          Livraison…
+        </option>
+      ) : null}
+      {group.options.map((option) => (
+        <option key={option.method} value={option.method}>
+          {`${DELIVERY_MODE_LABELS[option.method]} · ${formatFee(option.fee)}`}
+        </option>
+      ))}
+    </select>
+  );
+};
+
 const Line = ({
   item,
+  delivery,
   onQuantity,
   onRemove,
   busy,
 }: {
   item: CartItem;
+  delivery: ReactNode;
   onQuantity: (quantity: number) => void;
   onRemove: () => void;
   busy: boolean;
@@ -88,6 +141,9 @@ const Line = ({
       <div className={styles.controls}>
         <span className={styles.lineTotal}>{formatPrice(item.lineTotal)}</span>
 
+        <div className={styles.lineActions}>
+        {delivery}
+
         <div className={styles.quantity}>
           <button
             type="button"
@@ -115,6 +171,7 @@ const Line = ({
             +
           </button>
         </div>
+        </div>
 
         <button type="button" className={styles.remove} onClick={onRemove} disabled={busy}>
           Retirer
@@ -129,6 +186,19 @@ export const CartPage = () => {
   const delivery = useDeliveryQuote();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Par défaut, chaque boutique prend le premier mode que ses produits
+  // proposent (celui du produit quand il n'en a qu'un). Le client le change
+  // ensuite depuis n'importe quelle ligne de la boutique.
+  const { quote: currentQuote, selection, choose } = delivery;
+  useEffect(() => {
+    for (const group of currentQuote?.groups ?? []) {
+      const first = group.options[0];
+      if (first && group.selectedMethod === null && !selection[group.boutiqueId]) {
+        choose(group.boutiqueId, first.method);
+      }
+    }
+  }, [currentQuote, selection, choose]);
 
   // Toute écriture renvoie le panier complet : il suffit d'attendre et de
   // rapporter l'échec éventuel.
@@ -173,6 +243,10 @@ export const CartPage = () => {
   // Frais et total ne s'affichent que tels que le serveur les a calculés
   // pour le panier courant : jamais additionnés ici.
   const quoteCurrent = quote !== null && quote.subtotal === cart.totalAmount && !delivery.isLoading;
+  const groupOf = (productBoutiqueId: string) =>
+    quote?.groups.find((group) =>
+      group.items.some((line) => line.productBoutiqueId === productBoutiqueId)
+    );
 
   return (
     <CatalogPage>
@@ -198,6 +272,14 @@ export const CartPage = () => {
                 key={item.productBoutiqueId}
                 item={item}
                 busy={busy}
+                delivery={
+                  <LineDelivery
+                    item={item}
+                    group={groupOf(item.productBoutiqueId)}
+                    onChoose={delivery.choose}
+                    disabled={busy || delivery.isLoading}
+                  />
+                }
                 onQuantity={(quantity) =>
                   void run(() => setQuantity(item.productBoutiqueId, quantity))
                 }
@@ -239,12 +321,29 @@ export const CartPage = () => {
             {delivery.error ? (
               <Alert tone="danger">{delivery.error}</Alert>
             ) : quote ? (
-              <DeliveryChoices
-                quote={quote}
-                selection={delivery.selection}
-                onChoose={delivery.choose}
-                disabled={busy || delivery.isLoading}
-              />
+              // Le choix se fait sur les lignes ; ici, une livraison par boutique.
+              <ul className={styles.shipments}>
+                {quote.groups.map((group) => (
+                  <li key={group.boutiqueId} className={styles.shipment}>
+                    <span className={styles.shipmentHead}>
+                      <span className={styles.shipmentShop}>{group.boutiqueNom ?? "Boutique"}</span>
+                      <span>{group.fee !== null ? formatFee(group.fee) : "—"}</span>
+                    </span>
+                    {group.selectedMethod ? (
+                      <span className={styles.shipmentMode}>
+                        {group.selectedMethod === DeliveryMode.PICKUP && group.pickupAdresse
+                          ? `Retrait : ${group.pickupAdresse}`
+                          : DELIVERY_MODE_LABELS[group.selectedMethod]}
+                      </span>
+                    ) : null}
+                    {group.error ? (
+                      <span className={styles.shipmentError} role="alert">
+                        {group.error}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             ) : (
               <p className={styles.note}>Calcul des modes de livraison…</p>
             )}

@@ -1,0 +1,182 @@
+/* ── Deux volets : domaines | catégories du domaine ── */
+.layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* ── Volet des domaines ─────────────────────── */
+.side {
+  position: sticky;
+  top: calc(var(--header-height) + var(--space-5));
+  display: grid;
+  /* Le filtre en haut, la liste prend le reste et défile seule. */
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  max-height: calc(100vh - var(--header-height) - var(--space-7));
+  min-height: 0;
+}
+
+.filtre {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.filtre:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.domaines {
+  display: grid;
+  gap: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: var(--space-1);
+  overscroll-behavior: contain;
+}
+
+.domaine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.domaine:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.domaine:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.domaineActif,
+.domaineActif:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.domaineNom {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domaineCount {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.vide {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ── Volet du domaine choisi ────────────────── */
+.panel {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.panelHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panelTitre {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  color: var(--color-text);
+}
+
+.panelDesc {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.panelLien {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+/* ── Tablette et téléphone : les domaines en bande défilante ── */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .side {
+    position: static;
+    max-height: none;
+  }
+
+  .domaines {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .domaines::-webkit-scrollbar {
+    display: none;
+  }
+
+  .domaine {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 240px;
+    border-color: var(--color-border);
+    border-radius: 999px;
+    scroll-snap-align: start;
+  }
+
+  .panelTitre {
+    font-size: var(--text-xl);
+  }
+}

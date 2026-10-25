@@ -14,6 +14,7 @@ import {
   type SessionUser,
 } from "../shared/config/session.config.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
+import { normaliserProjet } from "../shared/helpers/projet.helper.js";
 import logger from '../shared/logger/logger.js';
 import { validationResult } from "express-validator";
 import type {
@@ -56,7 +57,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { nom, prenom, email, telephone, password, role } = req.body as RegisterDto;
+    const { nom, prenom, email, telephone, password, role, projet } = req.body as RegisterDto;
 
     logger.info(`Tentative d'inscription pour : ${email}`);
 
@@ -77,7 +78,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       prenom,
       email,
       telephone,
-      role
+      role,
+      // Le projet décrit à l'inscription personnalise le site dès la première visite.
+      projet: normaliserProjet(projet, new Date()),
     }], { session });
 
     // create() renvoie un tableau : après un succès, le document est bien présent.
@@ -277,6 +280,41 @@ export const updateMe = async (req: Request, res: Response): Promise<void> => {
     await session.abortTransaction();
     session.endSession();
     logger.error(`Erreur lors de la mise à jour du profil : ${(err as Error).message}`);
+    res.status(500).json(BaseResponse.ServerError((err as Error).message));
+  }
+};
+
+// ─────────────────────────────────────────────
+//  UPDATE PROJET
+//  Le client décrit ou modifie son projet (types, avancement du chantier).
+//  Un projet vide efface la réponse : la personnalisation repart de son
+//  activité seule.
+// ─────────────────────────────────────────────
+export const updateProjet = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json(BaseResponse.UnAuthorized("Authentification requise."));
+      return;
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(422).json(BaseResponse.BadRequest(errors.array().map(e => e.msg).join(" | ")));
+      return;
+    }
+
+    const projet = normaliserProjet(req.body, new Date());
+    const user = await User.findByIdAndUpdate(userId, { projet }, { new: true, runValidators: true });
+    if (!user) {
+      res.status(404).json(BaseResponse.NotFound("Utilisateur introuvable."));
+      return;
+    }
+
+    logger.info(`Projet mis à jour pour ${userId} : ${projet ? [...projet.types, projet.avancement ?? ""].join(" ").trim() : "aucun"}`);
+    res.json(BaseResponse.WithSuccess(user, "Projet enregistré."));
+  } catch (err) {
+    logger.error(`Erreur lors de la mise à jour du projet : ${(err as Error).message}`);
     res.status(500).json(BaseResponse.ServerError((err as Error).message));
   }
 };

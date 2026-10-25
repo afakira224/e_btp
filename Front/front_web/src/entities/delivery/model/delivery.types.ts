@@ -40,6 +40,13 @@ export const DELIVERY_MODE_HINTS: Record<DeliveryMode, string> = {
   flat_rate: "Un tarif unique par livraison, fixé par la boutique.",
 };
 
+/** La même promesse, vue par l'acheteur (fiche produit). */
+export const DELIVERY_MODE_BUYER_HINTS: Record<DeliveryMode, string> = {
+  pickup: "Vous récupérez votre commande à la boutique, sans frais.",
+  free: "Livrée à votre adresse ou sur votre chantier, sans frais.",
+  flat_rate: "Livrée à votre adresse ou sur votre chantier, un tarif unique par livraison.",
+};
+
 export const CURRENCY = "GNF";
 
 /** Un mode proposé et ses frais, calculés par le serveur. */

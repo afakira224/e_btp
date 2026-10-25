@@ -1,4 +1,5 @@
 import mongoose, { Document, Model, Schema, Types } from "mongoose";
+import { Etape } from "./projet.model.js";
 
 export interface ICategorie extends Document {
   familleId:   Types.ObjectId;
@@ -7,6 +8,8 @@ export interface ICategorie extends Document {
   image?:      string | null;
   ordre?:      number;
   actif:       boolean;
+  /** Étape du chantier où l'on a besoin de cette catégorie. */
+  etape:       Etape;
   deletedAt?:  Date | null;
   createdAt:   Date;
   updatedAt:   Date;
@@ -20,10 +23,14 @@ const categorieSchema = new Schema<ICategorie>(
     image:       { type: String, default: null },
     ordre:       { type: Number, default: 0 },
     actif:       { type: Boolean, default: true },
+    etape:       { type: String, enum: Object.values(Etape), default: Etape.TRANSVERSE },
     deletedAt:   { type: Date, default: null },
   },
   { timestamps: true }
 );
+
+// « Pour la suite de votre chantier » : catégories d'une étape, par famille.
+categorieSchema.index({ etape: 1, familleId: 1 });
 
 // Unicité du nom, mais uniquement au sein de la même famille
 categorieSchema.index({ familleId: 1, nom: 1 }, { unique: true });
