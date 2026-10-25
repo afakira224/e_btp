@@ -2,6 +2,10 @@ import { body, param, query, type ValidationChain } from "express-validator";
 import { ShopOrderStatus } from "../../models/shopOrder.model.js";
 import { MANUAL_ACTIONS, SHOP_ORDER_GROUP_KEYS } from "../helpers/shopOrder.workflow.js";
 
+// Une sous-commande pas encore payée n'existe pas pour la boutique : ce
+// statut ne se filtre pas.
+const LISTED_STATUSES = Object.values(ShopOrderStatus).filter((status) => status !== ShopOrderStatus.AWAITING_PAYMENT);
+
 // GET /shop-orders?boutiqueId=&group=&status=&search=&page=&limit=
 export const listShopOrdersForm: ValidationChain[] = [
   query("boutiqueId").optional().isMongoId().withMessage("Identifiant de boutique invalide."),
@@ -11,8 +15,8 @@ export const listShopOrdersForm: ValidationChain[] = [
     .withMessage(`Groupe invalide. Valeurs acceptées : ${SHOP_ORDER_GROUP_KEYS.join(", ")}.`),
   query("status")
     .optional()
-    .isIn(Object.values(ShopOrderStatus))
-    .withMessage(`Statut invalide. Valeurs acceptées : ${Object.values(ShopOrderStatus).join(", ")}.`),
+    .isIn(LISTED_STATUSES)
+    .withMessage(`Statut invalide. Valeurs acceptées : ${LISTED_STATUSES.join(", ")}.`),
   query("search").optional().trim().isLength({ max: 60 }).withMessage("Recherche limitée à 60 caractères."),
   query("page").optional().isInt({ min: 1 }).withMessage("La page doit être un entier positif."),
   query("limit").optional().isInt({ min: 1, max: 100 }).withMessage("La limite doit être comprise entre 1 et 100."),

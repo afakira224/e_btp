@@ -7,6 +7,7 @@ vi.mock("../../../../src/shared/mail/mail.queue.js", () => ({
 
 import { addToQueue } from "../../../../src/shared/mail/mail.queue.js";
 import {
+  sendNoticeMail,
   sendShopRequestApprovedMail,
   sendShopRequestReceivedMail,
   sendShopRequestRejectedMail,
@@ -42,5 +43,63 @@ describe("emails des demandes de boutique", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
     expect(html).toContain("Kipé &amp; Fils");
+  });
+});
+
+// ─────────────────────────────────────────────
+//  Avis des sous-commandes. Motifs, notes et réponses de boutique sont saisis
+//  par des personnes : tout ce qui entre dans le HTML est échappé.
+// ─────────────────────────────────────────────
+describe("sendNoticeMail", () => {
+  const mail = {
+    to: "client@example.com",
+    subject: "Commande CMD-42-1 confirmée",
+    title: "Commande confirmée",
+    paragraphs: ["Boutique Kaloum a confirmé votre commande.", "Merci."],
+  };
+
+  it("met l'avis en file, un paragraphe par ligne", () => {
+    const id = sendNoticeMail(mail);
+
+    expect(id).toBe(1);
+    expect(lastMail()).toMatchObject({ to: "client@example.com", subject: "Commande CMD-42-1 confirmée" });
+    expect(lastMail().html).toContain("<h2>Commande confirmée</h2>");
+    expect(lastMail().html).toContain("<p>Boutique Kaloum a confirmé votre commande.</p>");
+    expect(lastMail().html).toContain("<p>Merci.</p>");
+  });
+
+  it("salue la personne quand son nom est connu, sinon pas de formule d'appel", () => {
+    sendNoticeMail({ ...mail, username: "Aïssatou" });
+    expect(lastMail().html).toContain("Bonjour <strong>Aïssatou</strong>");
+
+    sendNoticeMail(mail);
+    expect(lastMail().html).not.toContain("Bonjour");
+  });
+
+  it("ajoute le bouton vers la page concernée seulement s'il est fourni", () => {
+    sendNoticeMail({ ...mail, cta: { path: "/compte/commandes/42", label: "Voir ma commande" } });
+    expect(lastMail().html).toContain('/compte/commandes/42"');
+    expect(lastMail().html).toContain("Voir ma commande</a>");
+
+    sendNoticeMail(mail);
+    expect(lastMail().html).not.toContain("<a ");
+  });
+
+  it("échappe le titre, le prénom, les paragraphes et le libellé du bouton", () => {
+    sendNoticeMail({
+      ...mail,
+      title: "Litige <b>ouvert</b>",
+      username: "O'Neil",
+      paragraphs: ['La boutique refuse le retour : <img src=x onerror="alert(1)">'],
+      cta: { path: "/admin/commandes/1", label: "Examiner & trancher" },
+    });
+
+    const { html } = lastMail();
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("Litige &lt;b&gt;ouvert&lt;/b&gt;");
+    expect(html).toContain("O&#39;Neil");
+    expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    expect(html).toContain("Examiner &amp; trancher");
   });
 });

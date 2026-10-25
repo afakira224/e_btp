@@ -10,11 +10,13 @@ import type { IProduct, IProductBoutique } from "../../src/models/product.model.
 import type { ICart } from "../../src/models/cart.model.js";
 import type { IWishlist } from "../../src/models/wishlist.model.js";
 import type { IOrder } from "../../src/models/order.model.js";
+import type { IShopOrder } from "../../src/models/shopOrder.model.js";
 import type { IReview } from "../../src/models/review.model.js";
 import type { IAddress } from "../../src/models/address.model.js";
 import type { IPromotion } from "../../src/models/promotion.model.js";
 import type { IShopRequest } from "../../src/models/shopRequest.model.js";
-import { DeliveryMethod, OrderStatus } from "../../src/models/order.model.js";
+import { DeliveryMethod, OrderStatus, PaymentMethod } from "../../src/models/order.model.js";
+import { ShopOrderPaymentStatus, ShopOrderStatus } from "../../src/models/shopOrder.model.js";
 import {
   DiscountType,
   PromotionScope,
@@ -204,6 +206,62 @@ export const makeOrderItem = (over: Over<IOrder["items"][number]> = {}) => ({
   quantity: 1,
   ...over,
 });
+
+/**
+ * Sous-commande : par défaut à confirmer, livrée à prix fixe, payée à la
+ * remise. `delivery` et `payment` sont fusionnés avec leurs valeurs par
+ * défaut : `{ payment: { status: PAID } }` garde la méthode et le montant
+ * remboursé. La livraison suit la boutique de la sous-commande.
+ */
+export const makeShopOrder = (over: Over<IShopOrder> = {}): IShopOrder => {
+  const { delivery, payment, ...rest } = over;
+  const boutiqueId = rest.boutiqueId ?? oid();
+  return doc({
+    _id: oid(),
+    orderId: oid(),
+    userId: oid(),
+    boutiqueNom: "Boutique Kaloum",
+    reference: "CMD-1767261600000-123456-1",
+    items: [],
+    subtotal: 50_000,
+    discountAmount: 0,
+    deliveryFee: 25_000,
+    amount: 75_000,
+    shippingAddress: {
+      destinataire: "Mamadou Diallo",
+      telephone: "620000000",
+      adresse: "Rue KA-020",
+      ville: "Conakry",
+      commune: "Ratoma",
+      pays: "Guinée",
+    },
+    customer: { nom: "Diallo", prenom: "Mamadou", telephone: "620000000" },
+    status: ShopOrderStatus.PENDING,
+    statusHistory: [],
+    pickupCode: "123456",
+    deliveryAttempts: 0,
+    return: null,
+    deadlineAt: null,
+    reminderAt: null,
+    ...rest,
+    boutiqueId,
+    delivery: {
+      boutiqueId,
+      boutiqueNom: "Boutique Kaloum",
+      method: DeliveryMethod.FLAT_RATE,
+      fee: 25_000,
+      ...delivery,
+    },
+    payment: {
+      method: PaymentMethod.ON_DELIVERY,
+      status: ShopOrderPaymentStatus.UNPAID,
+      paidAt: null,
+      refundedAmount: 0,
+      refundedAt: null,
+      ...payment,
+    },
+  }) as unknown as IShopOrder;
+};
 
 export const makeReview = (over: Over<IReview> = {}): IReview =>
   doc({

@@ -16,6 +16,7 @@ import {
 import { Cart } from "../../models/cart.model.js";
 import logger from "../logger/logger.js";
 import { HttpError } from "../middlewares/error.middleware.js";
+import { getPaymentProvider } from "../payment/payment.provider.js";
 import { runInTransaction } from "../helpers/transaction.js";
 import { scheduleFor } from "../helpers/shopOrder.workflow.js";
 import { releaseCoupon, restoreStock } from "./shopOrder.service.js";
@@ -137,5 +138,33 @@ export const restoreCartAfterFailedPayment = async (order: Pick<IOrder, "userId"
     await cart.save();
   } catch (error) {
     logger.error(`Panier non restauré après l'échec du paiement de ${order.reference} : ${(error as Error).message}`);
+  }
+};
+
+/**
+ * Paiement confirmé par le prestataire après l'échec de la commande (délai de
+ * 30 minutes dépassé) : l'argent a été pris pour une commande qui n'existe
+ * plus. On le rend aussitôt. Renvoie false si le remboursement n'a pas
+ * abouti : il est alors journalisé pour un traitement à la main.
+ */
+export const refundLatePayment = async (
+  order: Pick<IOrder, "paymentRef" | "amount" | "reference">
+): Promise<boolean> => {
+  const provider = getPaymentProvider();
+  if (!provider) {
+    logger.error(`Paiement tardif de ${order.reference} à rembourser : aucun prestataire de paiement configuré`);
+    return false;
+  }
+  try {
+    const result = await provider.refund({
+      providerRef: order.paymentRef ?? null,
+      amount: order.amount,
+      reference: order.reference,
+    });
+    logger.info(`Paiement tardif de ${order.reference} : remboursement ${result.status} (${order.amount} GNF)`);
+    return result.status === "refunded";
+  } catch (error) {
+    logger.error(`Paiement tardif de ${order.reference} non remboursé : ${(error as Error).message}`);
+    return false;
   }
 };

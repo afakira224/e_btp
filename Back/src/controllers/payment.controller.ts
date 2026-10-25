@@ -11,6 +11,7 @@ import { sendOrderConfirmationMail } from "../shared/helpers/mail.helper.js";
 import {
   confirmOrderPayment,
   failOrderPayment,
+  refundLatePayment,
   restoreCartAfterFailedPayment,
 } from "../shared/services/orderPayment.service.js";
 import { deliverNotices, newPartNotices } from "../shared/services/shopOrder.notifications.js";
@@ -135,7 +136,23 @@ export const settleSandboxPayment = async (req: Request, res: Response) => {
     const paid = req.body.outcome === "paid";
 
     if (paid) {
-      const settlement = await confirmOrderPayment(order._id);
+      let settlement;
+      try {
+        settlement = await confirmOrderPayment(order._id);
+      } catch (error) {
+        // 409 : la commande a échoué entre-temps (délai dépassé). Le client a
+        // payé une commande qui n'existe plus : son argent lui est rendu.
+        if (error instanceof HttpError && error.statusCode === 409) {
+          const refunded = await refundLatePayment(order);
+          throw new HttpError(
+            refunded
+              ? "Le délai de paiement était dépassé : la commande est annulée et votre paiement remboursé."
+              : "Le délai de paiement était dépassé : la commande est annulée. Le remboursement de votre paiement est en cours.",
+            409
+          );
+        }
+        throw error;
+      }
       if (settlement.changed) await notifyPaidOrder(settlement.order, settlement.parts);
       logger.info(`Paiement simulé confirmé : ${order.reference}`);
       const response = BaseResponse.WithSuccess(paymentSummary(settlement.order), "Paiement confirmé.");

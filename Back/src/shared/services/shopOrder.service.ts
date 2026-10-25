@@ -114,6 +114,10 @@ export const syncOrderStatus = async (
   return order;
 };
 
+/** Motif du dernier échec de livraison : il dit si le client en est la cause. */
+const lastDeliveryFailureReason = (part: Pick<IShopOrder, "statusHistory">): string | undefined =>
+  [...(part.statusHistory ?? [])].reverse().find((entry) => entry.status === ShopOrderStatus.DELIVERY_FAILED)?.reason;
+
 const DEFAULT_NOTES: Partial<Record<ShopOrderAction, string>> = {
   [ShopOrderAction.ESCALATE]: "La boutique n'a pas répondu au retour sous 48 heures.",
   [ShopOrderAction.CONFIRM_REFUND]: "Remboursement effectué.",
@@ -150,6 +154,9 @@ export const applyShopOrderAction = async ({
   const from = part.status;
   const to = targetStatus(action, input, part);
   const note = input.note?.trim() || DEFAULT_NOTES[action];
+  // Un motif ne compte que pour une action qui en prend : envoyé avec une
+  // autre, il n'entre ni dans l'historique ni dans le calcul du remboursement.
+  const reason = rule.reasons ? input.reason : undefined;
 
   // ── Effets propres à l'action ─────────────
   switch (action) {
@@ -211,7 +218,12 @@ export const applyShopOrderAction = async ({
     }
 
     if (part.payment.status === ShopOrderPaymentStatus.PAID) {
-      refund = refundAmountFor(part, to, input);
+      // Livraison abandonnée : la cause est celle constatée à l'échec, pas
+      // une raison donnée au moment d'abandonner.
+      refund = refundAmountFor(part, to, {
+        ...input,
+        reason: to === ShopOrderStatus.FAILED ? lastDeliveryFailureReason(part) : reason,
+      });
       if (refund > 0) {
         part.payment.status = ShopOrderPaymentStatus.REFUND_PENDING;
         part.payment.refundedAmount = refund;
@@ -236,7 +248,7 @@ export const applyShopOrderAction = async ({
     changedAt: now,
     actor,
     ...(userId ? { changedBy: new mongoose.Types.ObjectId(userId) } : {}),
-    ...(input.reason ? { reason: input.reason } : {}),
+    ...(reason ? { reason } : {}),
     ...(note ? { note } : {}),
   });
 

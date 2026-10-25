@@ -113,9 +113,11 @@ export const listShopOrders = async (req: Request, res: Response) => {
     const scope: Record<string, unknown> = { status: { $ne: ShopOrderStatus.AWAITING_PAYMENT } };
     if (boutiqueId) scope.boutiqueId = String(boutiqueId);
 
+    // Le filtre de statut se combine à l'exclusion des commandes non payées,
+    // il ne la remplace pas.
     const filter: Record<string, unknown> = { ...scope };
     if (group) filter.status = { $in: SHOP_ORDER_GROUPS[group as ShopOrderGroup] };
-    else if (status) filter.status = status;
+    else if (status) filter.status = { $eq: status, $ne: ShopOrderStatus.AWAITING_PAYMENT };
     if (search) filter.reference = { $regex: escapeRegex(String(search)), $options: "i" };
 
     const pageNum = Math.max(1, parseInt(page as string));
