@@ -13,12 +13,19 @@ import type { IOrder } from "../../src/models/order.model.js";
 import type { IReview } from "../../src/models/review.model.js";
 import type { IAddress } from "../../src/models/address.model.js";
 import type { IPromotion } from "../../src/models/promotion.model.js";
+import type { IShopRequest } from "../../src/models/shopRequest.model.js";
 import { DeliveryMethod, OrderStatus } from "../../src/models/order.model.js";
 import {
   DiscountType,
   PromotionScope,
   PromotionType,
 } from "../../src/models/promotion.model.js";
+import {
+  CatalogSize,
+  SellerExperience,
+  SellerType,
+  ShopRequestStatus,
+} from "../../src/models/shopRequest.model.js";
 
 // ─────────────────────────────────────────────
 //  Utilitaires
@@ -29,6 +36,8 @@ export const oid = (): Types.ObjectId => new Types.ObjectId();
 /** Dates figées : rend les assertions sur createdAt/updatedAt déterministes. */
 export const CREATED_AT = new Date("2026-01-01T10:00:00.000Z");
 export const UPDATED_AT = new Date("2026-01-02T10:00:00.000Z");
+/** Date d'acceptation des conditions de vente d'une demande de boutique. */
+export const ACCEPTED_TERMS_AT = new Date("2026-01-01T09:55:00.000Z");
 
 /**
  * Transforme un objet plat en pseudo-document Mongoose :
@@ -242,3 +251,27 @@ export const makePromotion = (over: Over<IPromotion> = {}): IPromotion =>
     actif: true,
     ...over,
   }) as unknown as IPromotion;
+
+export const makeShopRequest = (over: Over<IShopRequest> = {}): IShopRequest =>
+  doc({
+    _id: oid(),
+    userId: oid(),
+    nom: "Quincaillerie Kipé",
+    description: "Quincaillerie générale : visserie, outillage à main, serrurerie.",
+    familleIds: [oid()],
+    sellerType: SellerType.PARTICULIER,
+    rccm: null,
+    experience: SellerExperience.UN_A_TROIS,
+    catalogSize: CatalogSize.MOINS_DE_50,
+    hasPhysicalStore: true,
+    adresse: "Kipé, Ratoma, Conakry",
+    email: null,
+    message: null,
+    acceptedTermsAt: ACCEPTED_TERMS_AT,
+    status: ShopRequestStatus.PENDING,
+    rejectionReason: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    shopId: null,
+    ...over,
+  }) as unknown as IShopRequest;
