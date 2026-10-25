@@ -139,3 +139,24 @@ export const destroyUserSessions = async (
 
   return result.deletedCount ?? 0;
 };
+
+// ─────────────────────────────────────────────
+//  updateUserSessionsRole
+//  Reporte un changement de type de compte dans les sessions déjà ouvertes.
+//  requireRole lit le type en session : sans cette mise à jour, un client
+//  dont la boutique vient d'être approuvée resterait « user » jusqu'à sa
+//  prochaine connexion, et l'espace vendeur lui répondrait 403.
+// ─────────────────────────────────────────────
+export const updateUserSessionsRole = async (
+  userId: string,
+  entityType: EntityType
+): Promise<number> => {
+  const result = await mongoose.connection
+    .collection(SESSIONS_COLLECTION)
+    .updateMany(
+      { "session.user.id": userId },
+      { $set: { "session.user.entityType": entityType } }
+    );
+
+  return result.modifiedCount ?? 0;
+};

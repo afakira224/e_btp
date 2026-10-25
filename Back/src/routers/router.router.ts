@@ -13,12 +13,14 @@ import wishlistRouter from './router/wishlist.route.js';
 import reviewRouter from './router/review.route.js';
 import addressRouter from './router/address.route.js';
 import recommandationRouter from './router/recommandation.route.js';
+import shopRequestRouter from './router/shopRequest.route.js';
 
 const mainRouter = express.Router();
 
 
 mainRouter.use('/auth', authRouter);
 mainRouter.use('/shops', boutiqueRouter);
+mainRouter.use('/shop-requests', shopRequestRouter);
 mainRouter.use('/familles', familleRouter);
 mainRouter.use('/categories', categorieRouter);
 mainRouter.use('/sous-categories', sousCategorieRouter);

@@ -29,9 +29,29 @@ export const liveShop = (shop: Shop): Shop => ({
   delivery: toSettingsDto(shopDeliveryOf(shop.id)),
 });
 
+/**
+ * Toutes les boutiques : celles du catalogue de départ, modifications de
+ * leurs gérants appliquées, puis celles que l'administration a ouvertes.
+ */
+export const allShops = (): Shop[] => {
+  const db = readDb();
+  return [...SHOPS.map((shop) => ({ ...shop, ...db.shopPatches[shop.id] })), ...db.shops];
+};
+
 export const findShop = (id: string): Shop | undefined => {
-  const shop = SHOPS.find((candidate) => candidate.id === id);
+  const shop = allShops().find((candidate) => candidate.id === id);
   return shop ? liveShop(shop) : undefined;
+};
+
+/**
+ * Document Mongoose tel que `getShops`, `getShopById` et `updateShop` le
+ * renvoient, sans passer par toShopResponseDto : `_id` au lieu de `id`, plus
+ * `deletedAt` et `__v`, et la livraison en sous-document brut (modes et
+ * tarif, sans les `options` du DTO).
+ */
+export const rawShop = (shop: Shop) => {
+  const { id, ...rest } = shop;
+  return { _id: id, ...rest, delivery: shopDeliveryOf(id), deletedAt: null, __v: 0 };
 };
 
 /** Configuration propre ou héritage d'une offre, telle qu'elle est stockée. */
@@ -91,7 +111,7 @@ const fromSeller = (offer: MockOffer, shops: Map<string, Shop>): ProductBoutique
 
 /** Toutes les offres, réglages des vendeurs appliqués. Les plus récentes d'abord. */
 export const liveCatalog = (): ProductBoutique[] => {
-  const shops = new Map(SHOPS.map((shop) => [shop.id, liveShop(shop)]));
+  const shops = new Map(allShops().map((shop) => [shop.id, liveShop(shop)]));
   const added = [...readDb().offers]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((offer) => fromSeller(offer, shops));

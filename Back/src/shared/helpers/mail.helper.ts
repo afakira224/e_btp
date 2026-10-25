@@ -214,6 +214,75 @@ export const sendOrderConfirmationMail = (
     html: orderConfirmationTemplate(user.nom, order),
   });
 
+// ─────────────────────────────────────────────
+//  DEMANDES DE BOUTIQUE
+//  Le nom de la boutique et le motif de refus sont saisis par des
+//  utilisateurs : ils sont échappés avant d'entrer dans le HTML.
+// ─────────────────────────────────────────────
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const shopRequestTemplate = ({ title, username, body, cta }: {
+  title: string;
+  username: string;
+  body: string;
+  cta?: { url: string; label: string };
+}): string => `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+  <h2>${title}</h2>
+  <p>Bonjour <strong>${escapeHtml(username)}</strong>,</p>
+  ${body}
+  ${cta ? `<a href="${cta.url}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;border-radius:6px;text-decoration:none">${cta.label}</a>` : ""}
+  <p style="color:#999;font-size:12px">${APP_NAME}</p>
+</div>`;
+
+export const sendShopRequestReceivedMail = (user: Pick<IUser, "email" | "nom">, shopName: string): number =>
+  addToQueue({
+    to:      user.email,
+    subject: "Votre demande d'ouverture de boutique est enregistrée",
+    html:    shopRequestTemplate({
+      title:    "Demande reçue",
+      username: user.nom,
+      body:     `<p>Votre demande d'ouverture de la boutique <strong>${escapeHtml(shopName)}</strong> a bien été enregistrée. L'équipe l'examine et vous répond par email.</p>`,
+      cta:      { url: `${APP_URL}/compte/profil`, label: "Suivre ma demande" },
+    }),
+  });
+
+export const sendShopRequestApprovedMail = (user: Pick<IUser, "email" | "nom">, shopName: string): number =>
+  addToQueue({
+    to:      user.email,
+    subject: "Votre boutique est ouverte 🎉",
+    html:    shopRequestTemplate({
+      title:    "Votre boutique est ouverte",
+      username: user.nom,
+      body:     `<p>Bonne nouvelle : la boutique <strong>${escapeHtml(shopName)}</strong> a été approuvée. Vous pouvez dès maintenant ajouter vos produits et régler vos modes de livraison.</p>`,
+      cta:      { url: `${APP_URL}/ma-boutique`, label: "Accéder à ma boutique" },
+    }),
+  });
+
+export const sendShopRequestRejectedMail = (
+  user: Pick<IUser, "email" | "nom">,
+  shopName: string,
+  reason: string
+): number =>
+  addToQueue({
+    to:      user.email,
+    subject: "Votre demande d'ouverture de boutique",
+    html:    shopRequestTemplate({
+      title:    "Demande non retenue",
+      username: user.nom,
+      body:     `<p>Votre demande d'ouverture de la boutique <strong>${escapeHtml(shopName)}</strong> n'a pas été retenue.</p>
+  <p style="padding:12px;background:#F3F4F6;border-radius:6px">${escapeHtml(reason)}</p>
+  <p>Vous pouvez déposer une nouvelle demande en tenant compte de ce motif.</p>`,
+      cta:      { url: `${APP_URL}/compte/profil`, label: "Voir ma demande" },
+    }),
+  });
+
 export const sendOrderStatusMail = (
   user: Pick<IUser, "email" | "nom">,
   reference: string,

@@ -12,7 +12,6 @@ import {
   CATEGORIES_TREE,
   FAMILLES_TREE,
   PROMOTIONS,
-  SHOPS,
   SOUS_CATEGORIES,
 } from "./catalogSeed";
 import {
@@ -29,7 +28,8 @@ import {
 } from "./cartWishlist";
 import * as account from "./account";
 import * as seller from "./seller";
-import { findLiveOffer, liveCatalog, shopDeliveryOf } from "./liveCatalog";
+import * as shopRequests from "./shopRequests";
+import { allShops, findLiveOffer, liveCatalog, rawShop } from "./liveCatalog";
 import {
   objectId,
   randomToken,
@@ -338,7 +338,7 @@ const listProductBoutiques = (
   const productId = params.get("productId");
   const isFeatured = params.get("isFeatured");
 
-  if (boutiqueId && !SHOPS.some((shop) => shop.id === boutiqueId)) {
+  if (boutiqueId && !allShops().some((shop) => shop.id === boutiqueId)) {
     throw new ApiError("Boutique introuvable", 404);
   }
 
@@ -532,16 +532,10 @@ const getOffer = (id: string): ApiResponse<ProductBoutique> => {
 //  de `id`, plus `deletedAt` et `__v`. Le mock reproduit cette forme pour
 //  que le front soit éprouvé contre ce qu'il recevra vraiment.
 // ─────────────────────────────────────────────
-const rawShop = (shop: (typeof SHOPS)[number]) => {
-  const { id, ...rest } = shop;
-  // Le sous-document brut : modes et tarif, sans les `options` du DTO.
-  return { _id: id, ...rest, delivery: shopDeliveryOf(id), deletedAt: null, __v: 0 };
-};
-
 const listShops = (params: URLSearchParams) => {
   const search = params.get("search")?.toLowerCase();
   const ownerId = params.get("ownerId");
-  const toutes = SHOPS.filter((shop) => {
+  const toutes = allShops().filter((shop) => {
     if (ownerId && shop.ownerId !== ownerId) return false;
     if (search && !shop.nom.toLowerCase().includes(search)) return false;
     return true;
@@ -551,7 +545,7 @@ const listShops = (params: URLSearchParams) => {
 };
 
 const getShop = (id: string) => {
-  const shop = SHOPS.find((candidate) => candidate.id === id);
+  const shop = allShops().find((candidate) => candidate.id === id);
   if (!shop) throw new ApiError("Boutique introuvable.", 404);
   return ok(rawShop(shop));
 };
@@ -620,9 +614,28 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
       return seller.listProducts(params);
     case "POST /product-boutiques":
       return seller.createOffer(body);
+    case "POST /shop-requests":
+      return shopRequests.createRequest(body as Parameters<typeof shopRequests.createRequest>[0]);
+    case "GET /shop-requests":
+      return shopRequests.listRequests(params);
+    case "GET /shop-requests/mine":
+      return shopRequests.myRequests();
     default:
       break;
   }
+
+  // ── Demandes de boutique ──────────────────
+  // Après `/shop-requests/mine`, qui serait sinon lu comme un identifiant.
+  const demandeAction = /^PATCH \/shop-requests\/([^/]+)\/(cancel|approve|reject)$/.exec(key);
+  if (demandeAction?.[1]) {
+    const id = decodeURIComponent(demandeAction[1]);
+    if (demandeAction[2] === "cancel") return shopRequests.cancelRequest(id);
+    if (demandeAction[2] === "approve") return shopRequests.approveRequest(id);
+    return shopRequests.rejectRequest(id, body as Parameters<typeof shopRequests.rejectRequest>[1]);
+  }
+
+  const demande = /^GET \/shop-requests\/([^/]+)$/.exec(key);
+  if (demande?.[1]) return shopRequests.getRequest(decodeURIComponent(demande[1]));
 
   // ── Espace vendeur ────────────────────────
   // Avant `GET /shops/:id`, qui capturerait sinon `/shops/:id/delivery`.
@@ -676,6 +689,9 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
 
   const boutique = /^GET \/shops\/([^/]+)$/.exec(key);
   if (boutique?.[1]) return getShop(decodeURIComponent(boutique[1]));
+
+  const boutiqueModifiee = /^PUT \/shops\/([^/]+)$/.exec(key);
+  if (boutiqueModifiee?.[1]) return seller.updateShop(decodeURIComponent(boutiqueModifiee[1]), body);
 
   const famille = /^GET \/familles\/(.+)$/.exec(key);
   if (famille?.[1]) return getFamille(decodeURIComponent(famille[1]));

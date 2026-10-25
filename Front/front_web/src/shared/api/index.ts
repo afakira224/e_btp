@@ -1,3 +1,3 @@
 export { apiClient, type ApiResponse } from "./apiClient";
 export { ApiError } from "./ApiError";
-export { DEMO_EMAIL, DEMO_PASSWORD, SELLER_EMAIL, resetDb } from "./mock";
+export { ADMIN_EMAIL, DEMO_EMAIL, DEMO_PASSWORD, SELLER_EMAIL, resetDb } from "./mock";

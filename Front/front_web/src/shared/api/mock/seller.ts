@@ -1,4 +1,4 @@
-import { DELIVERY_MODES, isDeliveryMode, type ShopDeliveryOverview } from "../../../entities/delivery";
+import { DELIVERY_MODES, DeliveryMode, isDeliveryMode, type ShopDeliveryOverview } from "../../../entities/delivery";
 import type { Product, ProductBoutique } from "../../../entities/product";
 import type { Shop } from "../../../entities/shop";
 import { EntityType, type User } from "../../../entities/user";
@@ -6,8 +6,8 @@ import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
 import { PRODUCTS } from "./catalogSeed";
 import { buildProductDelivery, normalizeSettings, toSettingsDto, validateSettings } from "./deliveryRules";
-import { findLiveOffer, findShop, liveCatalog, shopDeliveryOf } from "./liveCatalog";
-import { objectId, readDb, writeDb, type MockProductDelivery } from "./mockDb";
+import { findLiveOffer, findShop, liveCatalog, rawShop, shopDeliveryOf } from "./liveCatalog";
+import { objectId, readDb, writeDb, type MockProductDelivery, type MockShopPatch } from "./mockDb";
 
 // ─────────────────────────────────────────────
 //  Espace vendeur — routes simulées.
@@ -17,6 +17,7 @@ import { objectId, readDb, writeDb, type MockProductDelivery } from "./mockDb";
 //   GET    /products?search=&page=&limit=                             public
 //   POST   /product-boutiques           multipart (images + champs)  boutique, admin
 //   PUT    /product-boutiques/:id       JSON ou multipart             boutique, admin
+//   PUT    /shops/:id                   JSON ou multipart (logo)      boutique, admin
 //
 //  Mêmes contrôles et mêmes messages que Back/src/controllers/{delivery,
 //  productBoutique}.controller.ts : 401 sans session, 403 hors rôle ou hors
@@ -170,6 +171,86 @@ export const updateShopDelivery = (
   writeDb(db);
 
   return ok(overviewOf(findShop(id)!), "Livraison de la boutique mise à jour.");
+};
+
+// ─────────────────────────────────────────────
+//  PUT /shops/:id — informations de la boutique (updateShop).
+//  Multipart quand un logo part avec : le fichier est le champ « logo »,
+//  `removeLogo` le retire. Le téléphone n'est ni lu ni renvoyé par le front.
+// ─────────────────────────────────────────────
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const updateShop = (id: string, body: unknown): ApiResponse<ReturnType<typeof rawShop>> => {
+  const user = requireSeller();
+
+  let fields: Record<string, unknown> = {};
+  let logo: File | undefined;
+  if (body instanceof FormData) {
+    body.forEach((value, key) => {
+      if (typeof value !== "string") {
+        if (key === "logo") logo = value;
+        return;
+      }
+      fields[key] = value;
+    });
+  } else {
+    fields = (body ?? {}) as Record<string, unknown>;
+  }
+
+  const read = (key: string) => (typeof fields[key] === "string" ? (fields[key] as string).trim() : undefined);
+  const nom = read("nom");
+  const description = read("description");
+  const email = read("email");
+  const adresse = read("adresse");
+
+  // updateShopForm
+  const errors: string[] = [];
+  if (nom !== undefined && (nom.length < 2 || nom.length > 100)) errors.push("Entre 2 et 100 caractères.");
+  if (description !== undefined && description.length > 1000) errors.push("Maximum 1000 caractères.");
+  if (email !== undefined && !EMAIL_PATTERN.test(email)) errors.push("Email invalide.");
+  if (adresse !== undefined && adresse.length > 255) errors.push("Maximum 255 caractères.");
+  if (errors.length > 0) throw new ApiError(errors.join(" | "), 422);
+
+  const shop = findShop(id);
+  if (!shop) throw new ApiError("Boutique introuvable.", 404);
+  if (!canManage(user, shop)) throw new ApiError(SHOP_FORBIDDEN_MESSAGE, 403);
+
+  // Le retrait se fait à l'adresse de la boutique : tant qu'elle le propose,
+  // par défaut ou sur un produit personnalisé, l'adresse ne peut pas disparaître.
+  if (adresse === "") {
+    const pickupByDefault = shopDeliveryOf(id).modes.includes(DeliveryMode.PICKUP);
+    const pickupOnProducts = liveCatalog().some(
+      (offer) =>
+        offer.boutique?.id === id &&
+        offer.delivery?.source === "product" &&
+        offer.delivery.modes.includes(DeliveryMode.PICKUP)
+    );
+    if (pickupByDefault || pickupOnProducts) {
+      throw new ApiError(
+        "L'adresse de la boutique sert au retrait en boutique : désactivez ce mode avant de la retirer.",
+        400
+      );
+    }
+  }
+
+  const removeLogo = fields.removeLogo === true || fields.removeLogo === "true";
+  const changes: MockShopPatch = {
+    ...(nom !== undefined ? { nom } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(email !== undefined ? { email: email.toLowerCase() } : {}),
+    ...(adresse !== undefined ? { adresse } : {}),
+    // URL d'objet, comme les photos des offres : elle ne survit pas à un rechargement.
+    ...(logo ? { logo: URL.createObjectURL(logo) } : removeLogo ? { logo: null } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const db = readDb();
+  const opened = db.shops.find((candidate) => candidate.id === id);
+  if (opened) Object.assign(opened, changes);
+  else db.shopPatches[id] = { ...db.shopPatches[id], ...changes };
+  writeDb(db);
+
+  return ok(rawShop(findShop(id)!), "Boutique mise à jour.");
 };
 
 // ─────────────────────────────────────────────

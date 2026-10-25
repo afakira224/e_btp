@@ -1,5 +1,12 @@
 import { EntityType, type User } from "../../../entities/user";
 import type { DeliveryMode } from "../../../entities/delivery";
+import type { Shop } from "../../../entities/shop";
+import {
+  CatalogSize,
+  SellerExperience,
+  SellerType,
+  ShopRequestStatus,
+} from "../../../entities/shop-request";
 import { seedAccountFor, type MockAddress, type MockOrder } from "./accountSeed";
 import { SHOPS } from "./catalogSeed";
 
@@ -97,6 +104,36 @@ export interface MockOffer {
   updatedAt: string;
 }
 
+/** Champs d'une boutique modifiables par son gérant (PUT /shops/:id). */
+export type MockShopPatch = Partial<Pick<Shop, "nom" | "description" | "logo" | "email" | "adresse">> & {
+  updatedAt: string;
+};
+
+/** Miroir de Back/src/models/shopRequest.model.ts. */
+export interface MockShopRequest {
+  id: string;
+  userId: string;
+  nom: string;
+  description: string;
+  familleIds: string[];
+  sellerType: SellerType;
+  rccm: string | null;
+  experience: SellerExperience;
+  catalogSize: CatalogSize;
+  hasPhysicalStore: boolean;
+  adresse: string;
+  email: string | null;
+  message: string | null;
+  acceptedTermsAt: string;
+  status: ShopRequestStatus;
+  rejectionReason: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  shopId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MockDb {
   users: User[];
   logins: MockEntityLogin[];
@@ -111,6 +148,12 @@ export interface MockDb {
   offerPatches: Record<string, MockOfferPatch>;
   /** Offres créées par les vendeurs. */
   offers: MockOffer[];
+  /** Boutiques ouvertes par l'administration, en plus de celles du catalogue de départ. */
+  shops: Shop[];
+  /** Modifications des boutiques du catalogue de départ, par identifiant. */
+  shopPatches: Record<string, MockShopPatch>;
+  /** Demandes d'ouverture de boutique. */
+  shopRequests: MockShopRequest[];
   /** Identifiant de l'utilisateur dont la session est ouverte. */
   sessionUserId: string | null;
   /** Compteur de sessions, pour que /auth/logout-all ait une réponse crédible. */
@@ -172,12 +215,90 @@ const sellerAccount = (): { user: User; login: MockEntityLogin } | null => {
   };
 };
 
-/** Base écrite avant l'espace vendeur : on y ajoute le compte du gérant. */
-const withSellerAccount = (db: MockDb): MockDb => {
-  const seller = sellerAccount();
-  if (!seller || db.logins.some((login) => login.email === SELLER_EMAIL)) return db;
-  return { ...db, users: [...db.users, seller.user], logins: [...db.logins, seller.login] };
+// Compte d'administration : il examine les demandes d'ouverture de boutique.
+export const ADMIN_EMAIL = "admin@btp.com";
+
+// Client qui a déjà déposé une demande : l'administration a de quoi examiner
+// dès la première connexion.
+const APPLICANT_EMAIL = "ibrahima@btp.com";
+
+const plainAccount = (
+  profile: Pick<User, "nom" | "prenom" | "email" | "role"> & { telephone?: string }
+): { user: User; login: MockEntityLogin } => {
+  const now = new Date().toISOString();
+  const id = objectId();
+  return {
+    user: { _id: id, avatar: null, isEmailVerified: true, createdAt: now, updatedAt: now, ...profile },
+    login: {
+      _id: objectId(),
+      entityId: id,
+      email: profile.email,
+      password: DEMO_PASSWORD,
+      entityType: profile.role,
+      emailVerifyToken: null,
+      resetPasswordToken: null,
+      resetPasswordExpires: null,
+    },
+  };
 };
+
+const adminAccount = () =>
+  plainAccount({ nom: "BTP", prenom: "Administration", email: ADMIN_EMAIL, role: EntityType.ADMIN });
+
+const applicantAccount = () =>
+  plainAccount({
+    nom: "Sow",
+    prenom: "Ibrahima",
+    email: APPLICANT_EMAIL,
+    telephone: "621334455",
+    role: EntityType.USER,
+  });
+
+const withAccount = (db: MockDb, account: { user: User; login: MockEntityLogin } | null): MockDb => {
+  if (!account || db.logins.some((login) => login.email === account.user.email)) return db;
+  return { ...db, users: [...db.users, account.user], logins: [...db.logins, account.login] };
+};
+
+/** Demande en attente du client de démonstration, déposée il y a deux jours. */
+const withPendingRequest = (db: MockDb): MockDb => {
+  const applicant = db.users.find((user) => user.email === APPLICANT_EMAIL);
+  if (!applicant || db.shopRequests.some((request) => request.userId === applicant._id)) return db;
+  const filedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const request: MockShopRequest = {
+    id: objectId(),
+    userId: applicant._id,
+    nom: "Quincaillerie Kipé",
+    description:
+      "Quincaillerie de quartier depuis 2017 : visserie, serrurerie, outillage à main et petit matériel électrique, avec un comptoir ouvert du lundi au samedi.",
+    familleIds: ["fam-equipement"],
+    sellerType: SellerType.ENTREPRISE,
+    rccm: "GN.TCC.2017.B.04521",
+    experience: SellerExperience.TROIS_A_DIX,
+    catalogSize: CatalogSize.DE_50_A_200,
+    hasPhysicalStore: true,
+    adresse: "Kipé, Ratoma, Conakry",
+    email: "contact@quincaillerie-kipe.gn",
+    message: "Nous livrons déjà nos clients du quartier et souhaitons toucher les chantiers de Ratoma.",
+    acceptedTermsAt: filedAt,
+    status: ShopRequestStatus.PENDING,
+    rejectionReason: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    shopId: null,
+    createdAt: filedAt,
+    updatedAt: filedAt,
+  };
+  return { ...db, shopRequests: [...db.shopRequests, request] };
+};
+
+/**
+ * Comptes et données ajoutés au fil des versions : une base écrite avant
+ * l'espace vendeur ou les demandes de boutique les reçoit à la lecture.
+ */
+const withDemoAccounts = (db: MockDb): MockDb =>
+  withPendingRequest(
+    withAccount(withAccount(withAccount(db, sellerAccount()), adminAccount()), applicantAccount())
+  );
 
 const seed = (): MockDb => {
   const now = new Date().toISOString();
@@ -239,7 +360,7 @@ const seed = (): MockDb => {
   // vide ne montre rien de ce qu'il sait faire.
   const demo = seedAccountFor(verifiedId);
 
-  return withSellerAccount({
+  return withDemoAccounts({
     users,
     logins,
     carts: [],
@@ -250,6 +371,9 @@ const seed = (): MockDb => {
     shopDeliveries: {},
     offerPatches: {},
     offers: [],
+    shops: [],
+    shopPatches: {},
+    shopRequests: [],
     sessionUserId: null,
     otherSessions: 2,
   });
@@ -282,7 +406,7 @@ export const readDb = (): MockDb => {
       // Une base écrite avant l'arrivée du panier, des favoris ou des
       // commandes n'a pas ces champs : on les comble plutôt que de laisser
       // un `undefined` se propager.
-      cache = withSellerAccount(
+      cache = withDemoAccounts(
         withAccountData(
           {
             ...parsed,
@@ -296,6 +420,9 @@ export const readDb = (): MockDb => {
             shopDeliveries: parsed.shopDeliveries ?? {},
             offerPatches: parsed.offerPatches ?? {},
             offers: parsed.offers ?? [],
+            shops: parsed.shops ?? [],
+            shopPatches: parsed.shopPatches ?? {},
+            shopRequests: parsed.shopRequests ?? [],
             sessionUserId: parsed.sessionUserId ?? null,
             otherSessions: parsed.otherSessions ?? 0,
           },
