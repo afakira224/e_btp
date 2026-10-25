@@ -35,7 +35,7 @@ import { validationResult } from "express-validator";
 import { Review } from "../../../src/models/review.model.js";
 import { productBoutique } from "../../../src/models/product.model.js";
 import { User } from "../../../src/models/user.model.js";
-import { Order, OrderStatus } from "../../../src/models/order.model.js";
+import { Order, ORDER_STATUSES_WITHOUT_SALE } from "../../../src/models/order.model.js";
 import {
   createReview,
   deleteReview,
@@ -145,7 +145,7 @@ describe("createReview", () => {
     expect(session.commitTransaction).toHaveBeenCalled();
   });
 
-  it("marque l'achat comme vérifié quand une commande non annulée contient le produit", async () => {
+  it("marque l'achat comme vérifié quand une commande aboutie contient le produit", async () => {
     const b = body();
     OrderMock.findOne.mockReturnValue(mockQuery(makeOrder()));
 
@@ -154,7 +154,8 @@ describe("createReview", () => {
     expect(OrderMock.findOne).toHaveBeenCalledWith({
       userId: b.userId,
       "items.productBoutiqueId": b.productBoutiqueId,
-      status: { $ne: OrderStatus.CANCELLED },
+      // Ni annulée, ni en attente ou en échec de paiement.
+      status: { $nin: ORDER_STATUSES_WITHOUT_SALE },
     });
     expect(ReviewMock.create.mock.calls[0]![0][0].verifiedPurchase).toBe(true);
   });

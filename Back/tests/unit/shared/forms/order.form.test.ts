@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  createOrderForm,
-  orderIdParam,
-  updateOrderStatusForm,
-} from "../../../../src/shared/forms/order.form.js";
-import { OrderStatus } from "../../../../src/models/order.model.js";
+import { createOrderForm, orderIdParam } from "../../../../src/shared/forms/order.form.js";
+import { PaymentMethod } from "../../../../src/models/order.model.js";
 import { VALID_OBJECT_ID, runValidation } from "../../../helpers/validation.js";
 
 describe("createOrderForm", () => {
@@ -64,47 +60,24 @@ describe("createOrderForm", () => {
 
     expect(req.body.adresse).toBe("Conakry");
   });
-});
 
-describe("updateOrderStatusForm", () => {
-  it.each(Object.values(OrderStatus))("accepte le statut %s", async (status) => {
-    const { isValid } = await runValidation(updateOrderStatusForm, {
-      params: { id: VALID_OBJECT_ID },
-      body: { status },
+  it.each(Object.values(PaymentMethod))("accepte le mode de paiement %s", async (paymentMethod) => {
+    const { isValid } = await runValidation(createOrderForm, {
+      params: { userId: VALID_OBJECT_ID },
+      body: { paymentMethod },
     });
 
     expect(isValid).toBe(true);
   });
 
-  it("exige le statut", async () => {
-    const { isValid, errors } = await runValidation(updateOrderStatusForm, {
-      params: { id: VALID_OBJECT_ID },
-      body: {},
+  it("rejette un mode de paiement inconnu", async () => {
+    const { isValid, errors } = await runValidation(createOrderForm, {
+      params: { userId: VALID_OBJECT_ID },
+      body: { paymentMethod: "cheque" },
     });
 
     expect(isValid).toBe(false);
-    expect(errors).toContain("Le statut est requis.");
-  });
-
-  it("rejette un statut inconnu et liste les valeurs autorisées", async () => {
-    const { isValid, errors } = await runValidation(updateOrderStatusForm, {
-      params: { id: VALID_OBJECT_ID },
-      body: { status: "en_route" },
-    });
-
-    expect(isValid).toBe(false);
-    expect(errors.join(" ")).toContain("Statut invalide");
-    expect(errors.join(" ")).toContain(OrderStatus.DELIVERED);
-  });
-
-  it("rejette un identifiant de commande invalide", async () => {
-    const { isValid, errors } = await runValidation(updateOrderStatusForm, {
-      params: { id: "abc" },
-      body: { status: OrderStatus.SHIPPED },
-    });
-
-    expect(isValid).toBe(false);
-    expect(errors).toContain("Identifiant de commande invalide.");
+    expect(errors.join(" ")).toContain("Mode de paiement invalide");
   });
 });
 

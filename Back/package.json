@@ -12,6 +12,7 @@
     "seed:reset": "tsx src/seed/index.ts --reset",
     "seed:volume": "tsx src/seed/index.ts --volume",
     "migrate:delivery": "tsx src/migrations/delivery.migration.ts",
+    "migrate:shop-orders": "tsx src/migrations/shopOrders.migration.ts",
     "reco:complements": "tsx src/scripts/complements.script.ts",
     "test": "vitest run",
     "test:watch": "vitest",

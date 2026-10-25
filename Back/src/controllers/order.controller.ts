@@ -2,14 +2,23 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { validationResult } from "express-validator";
 import {
-  ALLOWED_STATUS_TRANSITIONS,
   DeliveryMethod,
   Order,
+  OrderPaymentStatus,
   OrderStatus,
+  PaymentMethod,
   type IOrder,
   type IOrderItem,
   type IShippingAddress,
 } from "../models/order.model.js";
+import {
+  ShopOrder,
+  ShopOrderActor,
+  ShopOrderPaymentStatus,
+  ShopOrderStatus,
+  type IShopOrder,
+} from "../models/shopOrder.model.js";
+import { EntityType } from "../models/user.model.js";
 import { Cart } from "../models/cart.model.js";
 import { Address } from "../models/address.model.js";
 import { Product, productBoutique } from "../models/product.model.js";
@@ -18,6 +27,16 @@ import { Famille } from "../models/famille.model.js";
 import { Categorie } from "../models/categorie.model.js";
 import { SousCategorie } from "../models/sousCategorie.model.js";
 import { User } from "../models/user.model.js";
+import { getPaymentProvider } from "../shared/payment/payment.provider.js";
+import {
+  allocateDiscount,
+  DEADLINES,
+  generatePickupCode,
+  scheduleFor,
+} from "../shared/helpers/shopOrder.workflow.js";
+import { failOrderPayment, restoreCartAfterFailedPayment } from "../shared/services/orderPayment.service.js";
+import { deliverNotices, newPartNotices } from "../shared/services/shopOrder.notifications.js";
+import type { ShopOrderViewer } from "../shared/interfaces/ShopOrder.interfaces.js";
 import { Promotion, PromotionScope } from "../models/promotion.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
@@ -29,10 +48,7 @@ import {
   summaryMethod,
   toOrderDeliveries,
 } from "../shared/helpers/delivery.helper.js";
-import {
-  sendOrderConfirmationMail,
-  sendOrderStatusMail,
-} from "../shared/helpers/mail.helper.js";
+import { sendOrderConfirmationMail } from "../shared/helpers/mail.helper.js";
 
 // Génère une référence de commande lisible et raisonnablement unique.
 const generateReference = (): string => {
@@ -41,8 +57,14 @@ const generateReference = (): string => {
 };
 
 // Résout les documents (product_boutique, boutique, produit + taxonomie) référencés par
-// une liste de commandes, puis construit les DTOs enrichis. Lecture hors transaction.
-const enrichOrders = async (orders: IOrder[]): Promise<OrderResponseDto[]> => {
+// une liste de commandes, ainsi que leurs sous-commandes, puis construit les DTOs
+// enrichis. Lecture hors transaction. `parts` évite de relire des sous-commandes
+// déjà en mémoire (checkout).
+const enrichOrders = async (
+  orders: IOrder[],
+  viewer: ShopOrderViewer = "client",
+  knownParts?: IShopOrder[]
+): Promise<OrderResponseDto[]> => {
   const pbIds = new Set<string>();
   const shopIds = new Set<string>();
   const productIds = new Set<string>();
@@ -65,27 +87,36 @@ const enrichOrders = async (orders: IOrder[]): Promise<OrderResponseDto[]> => {
   const categoryIds = [...new Set(products.map(p => p.categoryId?.toString()).filter(Boolean))];
   const sousCategoryIds = [...new Set(products.map(p => p.sousCategoryId?.toString()).filter(Boolean))];
 
-  const [familles, categories, sousCategories] = await Promise.all([
+  const [familles, categories, sousCategories, parts] = await Promise.all([
     Famille.find({ _id: { $in: familleIds } }),
     Categorie.find({ _id: { $in: categoryIds } }),
     SousCategorie.find({ _id: { $in: sousCategoryIds } }),
+    knownParts ?? ShopOrder.find({ orderId: { $in: orders.map(order => order._id) } }),
   ]);
 
   return orders.map(order =>
-    toOrderResponseDto(order, productBoutiques, shops, products, familles, categories, sousCategories)
+    toOrderResponseDto(order, productBoutiques, shops, products, familles, categories, sousCategories, parts, viewer)
   );
 };
 
 // Enrichit une seule commande.
-const buildOrderDto = async (order: IOrder): Promise<OrderResponseDto> =>
-  (await enrichOrders([order]))[0]!;
+const buildOrderDto = async (
+  order: IOrder,
+  viewer: ShopOrderViewer = "client",
+  knownParts?: IShopOrder[]
+): Promise<OrderResponseDto> => (await enrichOrders([order], viewer, knownParts))[0]!;
 
 // ─────────────────────────────────────────────
 //  POST /orders/:userId   (checkout depuis le panier)
-//  { addressId?, deliveries?, deliveryMethod?, telephone?, adresse?, code? }
+//  { addressId?, deliveries?, deliveryMethod?, telephone?, adresse?, code?, paymentMethod? }
 //  Une livraison par boutique : le client choisit son mode parmi ceux que
 //  tous les articles de la boutique acceptent. Les frais sont calculés ici,
 //  jamais lus dans la requête.
+//
+//  La commande est découpée en une sous-commande par boutique, dans la même
+//  transaction. Paiement à la livraison : elles partent aussitôt chez les
+//  boutiques. Paiement en ligne : elles attendent la confirmation du
+//  prestataire, 30 minutes au plus, et la réponse porte l'adresse de paiement.
 // ─────────────────────────────────────────────
 export const createOrder = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
@@ -102,8 +133,18 @@ export const createOrder = async (req: Request, res: Response) => {
 
     const userId = String(req.params.userId);
     const { telephone, adresse, code, addressId } = req.body;
+    const online = req.body.paymentMethod === PaymentMethod.ONLINE;
+    const provider = online ? getPaymentProvider() : null;
 
     logger.info(`Création commande (checkout) pour utilisateur : ${userId}`);
+
+    if (online && !provider) {
+      await session.abortTransaction();
+      const response = BaseResponse.BadRequest(
+        "Le paiement en ligne n'est pas encore disponible : choisissez le paiement à la livraison ou au retrait."
+      );
+      return res.status(response.statusCode).json(response);
+    }
 
     const user = await User.findById(userId).session(session);
     if (!user) {
@@ -295,23 +336,28 @@ export const createOrder = async (req: Request, res: Response) => {
     // La réduction ne s'applique qu'aux articles ; les frais de port s'ajoutent ensuite.
     const shippingFee = quote.shippingFee;
     const amount = Math.max(0, subtotal - discountAmount) + shippingFee;
+    const now = new Date();
+    const orderStatus = online ? OrderStatus.AWAITING_PAYMENT : OrderStatus.IN_PROGRESS;
 
     const [order] = await Order.create(
       [{
         userId,
         reference: generateReference(),
+        paymentMethod: online ? PaymentMethod.ONLINE : PaymentMethod.ON_DELIVERY,
+        paymentStatus: online ? OrderPaymentStatus.PENDING : OrderPaymentStatus.ON_DELIVERY,
+        paymentExpiresAt: online ? new Date(now.getTime() + DEADLINES.payment) : null,
         items: orderItems,
         subtotal,
         discountAmount,
         promotionCode,
         shippingFee,
         amount,
-        status: OrderStatus.PENDING,
+        status: orderStatus,
         // Première entrée de l'historique : la création de la commande.
         statusHistory: [
           {
-            status: OrderStatus.PENDING,
-            changedAt: new Date(),
+            status: orderStatus,
+            changedAt: now,
             changedBy: userId,
             note: "Commande créée",
           },
@@ -330,6 +376,59 @@ export const createOrder = async (req: Request, res: Response) => {
     // create() renvoie un tableau : après un succès, le document est bien présent.
     if (!order) throw new Error("La création de la commande a échoué.");
 
+    // ── Sous-commandes : une par boutique ─────────────────
+    // Le coupon est réparti au prorata des sous-totaux : chaque boutique
+    // rembourse, le cas échéant, exactement sa part.
+    const groups = deliveries.map(delivery => ({
+      delivery,
+      items: orderItems.filter(item => item.boutiqueId?.toString() === delivery.boutiqueId.toString()),
+    }));
+    const subtotals = groups.map(group => group.items.reduce((sum, item) => sum + item.price * item.quantity, 0));
+    const shares = allocateDiscount(subtotals, discountAmount);
+    const partStatus = online ? ShopOrderStatus.AWAITING_PAYMENT : ShopOrderStatus.PENDING;
+    const schedule = scheduleFor(partStatus, now);
+
+    const parts = await ShopOrder.create(
+      groups.map((group, index) => {
+        const partSubtotal = subtotals[index] ?? 0;
+        const partDiscount = shares[index] ?? 0;
+        return {
+          orderId: order._id,
+          userId,
+          boutiqueId: group.delivery.boutiqueId,
+          boutiqueNom: group.delivery.boutiqueNom,
+          reference: `${order.reference}-${index + 1}`,
+          items: group.items,
+          subtotal: partSubtotal,
+          discountAmount: partDiscount,
+          deliveryFee: group.delivery.fee,
+          amount: Math.max(0, partSubtotal - partDiscount) + group.delivery.fee,
+          delivery: group.delivery,
+          // L'adresse ne sert qu'à une livraison ; un retrait se fait en boutique.
+          ...(shippingAddress && group.delivery.method !== DeliveryMethod.PICKUP ? { shippingAddress } : {}),
+          customer: {
+            nom: user.nom,
+            prenom: user.prenom,
+            telephone: telephone ?? shippingAddress?.telephone ?? user.telephone,
+          },
+          payment: {
+            method: online ? PaymentMethod.ONLINE : PaymentMethod.ON_DELIVERY,
+            status: ShopOrderPaymentStatus.UNPAID,
+            refundedAmount: 0,
+          },
+          status: partStatus,
+          statusHistory: [
+            { status: partStatus, changedAt: now, actor: ShopOrderActor.CLIENT, changedBy: userId, note: "Commande passée" },
+          ],
+          pickupCode: generatePickupCode(),
+          deliveryAttempts: 0,
+          deadlineAt: schedule.deadlineAt,
+          reminderAt: schedule.reminderAt,
+        };
+      }),
+      { session, ordered: true }
+    );
+
     // Vidage du panier après passage de commande.
     cart.items.splice(0, cart.items.length);
     cart.amount = 0;
@@ -337,10 +436,48 @@ export const createOrder = async (req: Request, res: Response) => {
 
     await session.commitTransaction();
 
-    logger.info(`Commande créée : ${order.reference} (${order._id})`);
+    logger.info(`Commande créée : ${order.reference} (${order._id}), ${parts.length} sous-commande(s)`);
 
-    // Email de confirmation (hors transaction : un échec d'envoi ne doit pas
-    // annuler une commande déjà validée — la file gère ses propres relances).
+    // ── Paiement en ligne : lancement chez le prestataire ──
+    // Hors transaction : la commande existe, le stock est réservé. Si le
+    // prestataire ne répond pas, la commande échoue tout de suite et le
+    // panier revient au client.
+    if (online && provider) {
+      try {
+        const initiation = await provider.initiate({
+          orderId: String(order._id),
+          reference: order.reference,
+          amount,
+        });
+        order.paymentRef = initiation.providerRef;
+        await order.save();
+        const dto = await buildOrderDto(order, "client", parts);
+        const response = BaseResponse.Created(
+          { ...dto, payment: { redirectUrl: initiation.redirectUrl } },
+          "Commande créée : il reste à la payer."
+        );
+        return res.status(response.statusCode).json(response);
+      } catch (paymentError) {
+        logger.error(`Paiement de ${order.reference} non lancé : ${(paymentError as Error).message}`);
+        await failOrderPayment(order._id, "refused");
+        await restoreCartAfterFailedPayment(order);
+        const response = new BaseResponse(
+          false,
+          "Le paiement en ligne n'a pas pu être lancé. Votre panier est restauré : réessayez ou payez à la livraison.",
+          502,
+          null
+        );
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Paiement à la remise : la commande part tout de suite chez les boutiques.
+    // Emails hors transaction : un échec d'envoi ne doit pas annuler une
+    // commande déjà validée — la file gère ses propres relances.
+    for (const part of parts) {
+      await deliverNotices(newPartNotices(part), part);
+    }
+
     try {
       sendOrderConfirmationMail(user, {
         reference: order.reference,
@@ -359,11 +496,13 @@ export const createOrder = async (req: Request, res: Response) => {
       logger.error(`Email de confirmation non envoyé : ${(mailError as Error).message}`);
     }
 
-    const dto = await buildOrderDto(order);
+    const dto = await buildOrderDto(order, "client", parts);
     const response = BaseResponse.Created(dto, "Commande créée avec succès");
     return res.status(response.statusCode).json(response);
   } catch (error) {
-    await session.abortTransaction();
+    // L'erreur a pu survenir après la validation (lecture du DTO) : il n'y a
+    // alors plus rien à annuler.
+    await session.abortTransaction().catch(() => undefined);
     logger.error(`Erreur création commande : ${(error as Error).message}`);
     const response = BaseResponse.ServerError((error as Error).message);
     return res.status(response.statusCode).json(response);
@@ -374,13 +513,17 @@ export const createOrder = async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────
 //  GET /orders?userId=&status=&page=&limit=
+//  Un client ne lit que ses commandes, même sans userId dans la requête ;
+//  l'administration lit celles de tous, ou d'un client.
 // ─────────────────────────────────────────────
 export const getOrders = async (req: Request, res: Response) => {
   try {
     const { userId, status, page = "1", limit = "10" } = req.query;
+    const admin = req.user?.entityType === EntityType.ADMIN;
 
     const filter: Record<string, unknown> = {};
-    if (userId) filter.userId = userId;
+    if (!admin) filter.userId = req.user?.id;
+    else if (userId) filter.userId = userId;
     if (status) filter.status = status;
 
     const pageNum = Math.max(1, parseInt(page as string));
@@ -394,7 +537,7 @@ export const getOrders = async (req: Request, res: Response) => {
 
     logger.info(`Liste commandes — total : ${total}`);
 
-    const ordersDto = await enrichOrders(orders);
+    const ordersDto = await enrichOrders(orders, admin ? "admin" : "client");
 
     const response = BaseResponse.WithSuccess(
       {
@@ -434,126 +577,19 @@ export const getOrderById = async (req: Request, res: Response) => {
     }
 
     // Un client ne consulte que ses propres commandes ; l'admin voit tout.
-    if (req.user && req.user.entityType !== "admin" && order.userId.toString() !== req.user.id) {
+    if (req.user && req.user.entityType !== EntityType.ADMIN && order.userId.toString() !== req.user.id) {
       logger.warn(`Accès refusé à la commande ${id} pour ${req.user.id}`);
       const response = BaseResponse.Forbidden("Vous ne pouvez consulter que vos propres commandes.");
       return res.status(response.statusCode).json(response);
     }
 
-    const dto = await buildOrderDto(order);
+    const dto = await buildOrderDto(order, req.user?.entityType === EntityType.ADMIN ? "admin" : "client");
     const response = BaseResponse.WithSuccess(dto, "Commande récupérée avec succès");
     return res.status(response.statusCode).json(response);
   } catch (error) {
     logger.error(`Erreur récupération commande : ${(error as Error).message}`);
     const response = BaseResponse.ServerError((error as Error).message);
     return res.status(response.statusCode).json(response);
-  }
-};
-
-// ─────────────────────────────────────────────
-//  PATCH /orders/:id/status   { status, note? }
-//  Passer une commande à "cancelled" restitue le stock des produits.
-// ─────────────────────────────────────────────
-export const updateOrderStatus = async (req: Request, res: Response) => {
-  const session = await mongoose.startSession();
-
-  try {
-    session.startTransaction();
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      await session.abortTransaction();
-      const response = BaseResponse.BadRequest(errors.array().map(e => e.msg).join(" | "));
-      return res.status(422).json(response);
-    }
-
-    const id = String(req.params.id);
-    const { status, note } = req.body as { status: OrderStatus; note?: string };
-
-    logger.info(`Mise à jour statut commande ${id} → ${status}`);
-
-    const order = await Order.findById(id).session(session);
-    if (!order) {
-      await session.abortTransaction();
-      logger.warn(`Commande introuvable pour mise à jour : ${id}`);
-      const response = BaseResponse.NotFound("Commande non trouvée");
-      return res.status(response.statusCode).json(response);
-    }
-
-    if (order.status === status) {
-      await session.abortTransaction();
-      const response = BaseResponse.BadRequest(`La commande est déjà au statut "${status}".`);
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Le cycle de vie d'une commande est un graphe orienté : on refuse
-    // les sauts incohérents (livrée → en attente, annulée → expédiée…).
-    const allowed = ALLOWED_STATUS_TRANSITIONS[order.status] ?? [];
-    if (!allowed.includes(status)) {
-      await session.abortTransaction();
-      logger.warn(`Transition refusée : ${order.status} → ${status} (commande ${id})`);
-      const message = allowed.length
-        ? `Transition invalide : "${order.status}" → "${status}". Transitions possibles : ${allowed.join(", ")}.`
-        : `La commande est au statut terminal "${order.status}" et ne peut plus changer.`;
-      const response = BaseResponse.BadRequest(message);
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Annulation : on restitue le stock (une seule fois, si la commande ne l'était pas déjà).
-    if (status === OrderStatus.CANCELLED && order.status !== OrderStatus.CANCELLED) {
-      for (const item of order.items) {
-        const pb = await productBoutique.findById(item.productBoutiqueId).session(session);
-        if (pb) {
-          pb.stock += item.quantity;
-          await pb.save({ session });
-        }
-      }
-      logger.info(`Stock restitué pour la commande annulée : ${order.reference}`);
-
-      // Restitution de l'utilisation du coupon éventuel.
-      if (order.promotionCode) {
-        const promo = await Promotion.findOne({ code: order.promotionCode }).session(session);
-        if (promo && promo.usedCount > 0) {
-          promo.usedCount -= 1;
-          await promo.save({ session });
-          logger.info(`Utilisation du coupon ${order.promotionCode} restituée`);
-        }
-      }
-    }
-
-    order.status = status;
-
-    // Trace horodatée de la transition, avec son auteur quand il est connu.
-    order.statusHistory.push({
-      status,
-      changedAt: new Date(),
-      ...(req.user?.id ? { changedBy: new mongoose.Types.ObjectId(req.user.id) } : {}),
-      ...(note ? { note } : {}),
-    });
-
-    await order.save({ session });
-    await session.commitTransaction();
-
-    logger.info(`Statut commande mis à jour : ${id} → ${status}`);
-
-    // Notification du client (hors transaction).
-    try {
-      const client = await User.findById(order.userId);
-      if (client) sendOrderStatusMail(client, order.reference, status);
-    } catch (mailError) {
-      logger.error(`Email de suivi non envoyé : ${(mailError as Error).message}`);
-    }
-
-    const dto = await buildOrderDto(order);
-    const response = BaseResponse.WithSuccess(dto, "Statut de la commande mis à jour avec succès");
-    return res.status(response.statusCode).json(response);
-  } catch (error) {
-    await session.abortTransaction();
-    logger.error(`Erreur mise à jour statut commande : ${(error as Error).message}`);
-    const response = BaseResponse.ServerError((error as Error).message);
-    return res.status(response.statusCode).json(response);
-  } finally {
-    session.endSession();
   }
 };
 

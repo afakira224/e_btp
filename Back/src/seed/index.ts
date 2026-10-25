@@ -10,6 +10,8 @@ import { Categorie } from "../models/categorie.model.js";
 import { Complementarite } from "../models/complementarite.model.js";
 import { Famille } from "../models/famille.model.js";
 import { Order } from "../models/order.model.js";
+import { ShopOrder } from "../models/shopOrder.model.js";
+import { migrateLegacyOrders } from "../migrations/shopOrders.migration.js";
 import { Product, productBoutique } from "../models/product.model.js";
 import { Promotion } from "../models/promotion.model.js";
 import { RecentlyViewed } from "../models/recentlyViewed.model.js";
@@ -138,6 +140,7 @@ async function main() {
   }
   if (reset) {
     for (const [, model] of plan) await model.collection.deleteMany({});
+    await ShopOrder.collection.deleteMany({});
     // Les sessions ouvertes pointent vers des comptes supprimés.
     await mongoose.connection.collection("sessions").deleteMany({});
     console.log("Collections du seed vidées.");
@@ -172,6 +175,11 @@ async function main() {
     await insert(model, data[key]);
     console.log(`  ${String(data[key].length).padStart(6)}  ${key}`);
   }
+
+  // Les commandes de démonstration sont écrites comme avant les sous-commandes :
+  // la migration les découpe par boutique, comme elle le ferait en production.
+  const migrated = await migrateLegacyOrders(now);
+  console.log(`  ${String(migrated.parts).padStart(6)}  shopOrders`);
 
   if (catalog) await insertVolume(catalog, options, now);
 

@@ -50,15 +50,38 @@ vi.mock("../../../src/models/address.model.js", async () => {
   return { Address: mockModel() };
 });
 
+vi.mock("../../../src/models/shopOrder.model.js", async () => {
+  // Seul le modèle Mongoose est simulé : enums et constantes restent réels.
+  const actual = await import("../../../src/models/shopOrder.model.js");
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { ...actual, ShopOrder: mockModel() };
+});
+
 // Les emails partent dans une file asynchrone : on vérifie l'appel, pas l'envoi.
 vi.mock("../../../src/shared/helpers/mail.helper.js", () => ({
   sendOrderConfirmationMail: vi.fn(() => 1),
-  sendOrderStatusMail: vi.fn(() => 2),
 }));
 
-vi.mock("../../../src/models/user.model.js", async () => {
+// Avis aux boutiques : construits pour de vrai, envoyés pour de faux.
+vi.mock("../../../src/shared/services/shopOrder.notifications.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/shared/services/shopOrder.notifications.js")>();
+  return { ...actual, deliverNotices: vi.fn(async () => undefined) };
+});
+
+// Le paiement en ligne : prestataire et règlement simulés.
+vi.mock("../../../src/shared/payment/payment.provider.js", () => ({
+  getPaymentProvider: vi.fn(() => null),
+}));
+
+vi.mock("../../../src/shared/services/orderPayment.service.js", () => ({
+  failOrderPayment: vi.fn(async () => ({ changed: true })),
+  restoreCartAfterFailedPayment: vi.fn(async () => undefined),
+}));
+
+vi.mock("../../../src/models/user.model.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/models/user.model.js")>();
   const { mockModel } = await import("../../helpers/model.mock.js");
-  return { User: mockModel() };
+  return { ...actual, User: mockModel() };
 });
 
 vi.mock("express-validator", async (importOriginal) => {
@@ -70,8 +93,21 @@ vi.mock("express-validator", async (importOriginal) => {
 });
 
 import { validationResult } from "express-validator";
-import { DeliveryMethod, Order, OrderStatus } from "../../../src/models/order.model.js";
-import { Promotion, PromotionScope } from "../../../src/models/promotion.model.js";
+import {
+  DeliveryMethod,
+  Order,
+  OrderPaymentStatus,
+  OrderStatus,
+  PaymentMethod,
+} from "../../../src/models/order.model.js";
+import { ShopOrder, ShopOrderStatus } from "../../../src/models/shopOrder.model.js";
+import { getPaymentProvider } from "../../../src/shared/payment/payment.provider.js";
+import {
+  failOrderPayment,
+  restoreCartAfterFailedPayment,
+} from "../../../src/shared/services/orderPayment.service.js";
+import { deliverNotices } from "../../../src/shared/services/shopOrder.notifications.js";
+import { DiscountType, Promotion, PromotionScope } from "../../../src/models/promotion.model.js";
 import { Cart } from "../../../src/models/cart.model.js";
 import { Product, productBoutique } from "../../../src/models/product.model.js";
 import { Shop } from "../../../src/models/boutique.model.js";
@@ -80,16 +116,12 @@ import { Categorie } from "../../../src/models/categorie.model.js";
 import { SousCategorie } from "../../../src/models/sousCategorie.model.js";
 import { User } from "../../../src/models/user.model.js";
 import { Address } from "../../../src/models/address.model.js";
-import {
-  sendOrderConfirmationMail,
-  sendOrderStatusMail,
-} from "../../../src/shared/helpers/mail.helper.js";
+import { sendOrderConfirmationMail } from "../../../src/shared/helpers/mail.helper.js";
 import {
   createOrder,
   deleteOrder,
   getOrderById,
   getOrders,
-  updateOrderStatus,
 } from "../../../src/controllers/order.controller.js";
 import { mockQuery } from "../../helpers/model.mock.js";
 import { mockRequest, mockResponse, mockSession } from "../../helpers/express.mock.js";
@@ -118,6 +150,10 @@ const CategorieMock = Categorie as unknown as Record<string, any>;
 const SousCategorieMock = SousCategorie as unknown as Record<string, any>;
 const UserMock = User as unknown as Record<string, any>;
 const AddressMock = Address as unknown as Record<string, any>;
+const ShopOrderMock = ShopOrder as unknown as Record<string, any>;
+
+/** Sous-commandes créées au dernier checkout. */
+const createdParts = (): any[] => ShopOrderMock.create.mock.calls.at(-1)?.[0] ?? [];
 
 let session: ReturnType<typeof mockSession>;
 
@@ -148,6 +184,11 @@ beforeEach(() => {
   OrderMock.countDocuments.mockReturnValue(mockQuery(0));
   OrderMock.create.mockImplementation(async (docs: any[]) => [makeOrder(docs[0])]);
   AddressMock.findById.mockReturnValue(mockQuery(null));
+  ShopOrderMock.find.mockReturnValue(mockQuery([]));
+  ShopOrderMock.create.mockImplementation(async (docs: any[]) =>
+    docs.map((doc) => ({ _id: oid(), createdAt: new Date(), updatedAt: new Date(), ...doc }))
+  );
+  vi.mocked(getPaymentProvider).mockReturnValue(null);
 });
 
 /**
@@ -273,7 +314,10 @@ describe("createOrder", () => {
     // 20 000 d'articles + 25 000 de livraison à prix fixe
     expect(created.shippingFee).toBe(25_000);
     expect(created.amount).toBe(45_000);
-    expect(created.status).toBe(OrderStatus.PENDING);
+    // Paiement à la remise : la commande part aussitôt chez les boutiques.
+    expect(created.status).toBe(OrderStatus.IN_PROGRESS);
+    expect(created.paymentMethod).toBe(PaymentMethod.ON_DELIVERY);
+    expect(created.paymentStatus).toBe(OrderPaymentStatus.ON_DELIVERY);
   });
 
   it("génère une référence préfixée CMD-", async () => {
@@ -450,15 +494,36 @@ describe("getOrders", () => {
     expect(res.body.data.page).toBe(1);
   });
 
-  it("filtre par utilisateur et par statut", async () => {
+  it("filtre par utilisateur et par statut pour l'administration", async () => {
     const userId = oid().toString();
 
     await getOrders(
-      mockRequest({ query: { userId, status: OrderStatus.SHIPPED } }),
+      mockRequest({
+        query: { userId, status: OrderStatus.IN_PROGRESS },
+        user: { id: oid().toString(), entityType: "admin" },
+      }),
       mockResponse()
     );
 
-    expect(OrderMock.find).toHaveBeenCalledWith({ userId, status: OrderStatus.SHIPPED });
+    expect(OrderMock.find).toHaveBeenCalledWith({ userId, status: OrderStatus.IN_PROGRESS });
+  });
+
+  it("limite un client à ses commandes, même sans userId dans la requête", async () => {
+    const self = oid().toString();
+
+    await getOrders(mockRequest({ query: {}, user: { id: self, entityType: "user" } }), mockResponse());
+
+    expect(OrderMock.find).toHaveBeenCalledWith({ userId: self });
+  });
+
+  it("joint ses sous-commandes à chaque commande", async () => {
+    const order = makeOrder({ items: [] });
+    OrderMock.find.mockReturnValue(mockQuery([order]));
+    ShopOrderMock.find.mockReturnValue(mockQuery([]));
+
+    await getOrders(mockRequest({ user: { id: order.userId.toString(), entityType: "user" } }), mockResponse());
+
+    expect(ShopOrderMock.find).toHaveBeenCalledWith({ orderId: { $in: [order._id] } });
   });
 
   it("plafonne la taille de page à 100", async () => {
@@ -520,142 +585,6 @@ describe("getOrderById", () => {
 
     expect(res.statusCode).toBe(404);
     expect(res.body.message).toBe("Commande non trouvée");
-  });
-});
-
-// ─────────────────────────────────────────────
-describe("updateOrderStatus", () => {
-  it("renvoie 404 quand la commande est introuvable", async () => {
-    OrderMock.findById.mockReturnValue(mockQuery(null));
-    const res = mockResponse();
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: oid().toString() }, body: { status: OrderStatus.SHIPPED } }),
-      res
-    );
-
-    expect(res.statusCode).toBe(404);
-    expect(session.abortTransaction).toHaveBeenCalled();
-  });
-
-  it("refuse une transition vers le statut courant", async () => {
-    const order = makeOrder({ status: OrderStatus.PENDING });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    const res = mockResponse();
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.PENDING } }),
-      res
-    );
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body.message).toBe('La commande est déjà au statut "pending".');
-    expect(order.save).not.toHaveBeenCalled();
-  });
-
-  it("met à jour un statut non terminal sans toucher au stock", async () => {
-    const order = makeOrder({ status: OrderStatus.PENDING, items: [makeOrderItem()] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    const res = mockResponse();
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CONFIRMED } }),
-      res
-    );
-
-    expect(order.status).toBe(OrderStatus.CONFIRMED);
-    expect(order.save).toHaveBeenCalledWith({ session });
-    expect(PbMock.findById).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(200);
-  });
-
-  it("restitue le stock à l'annulation", async () => {
-    const pb = makeProductBoutique({ stock: 5 });
-    const order = makeOrder({
-      status: OrderStatus.CONFIRMED,
-      items: [makeOrderItem({ productBoutiqueId: pb._id, quantity: 3 })],
-    });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    PbMock.findById.mockReturnValue(mockQuery(pb));
-    PbMock.find.mockReturnValue(mockQuery([pb]));
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CANCELLED } }),
-      mockResponse()
-    );
-
-    expect(pb.stock).toBe(8);
-    expect(pb.save).toHaveBeenCalledWith({ session });
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-  });
-
-  it("tolère un produit supprimé lors de la restitution du stock", async () => {
-    const order = makeOrder({
-      status: OrderStatus.CONFIRMED,
-      items: [makeOrderItem({ quantity: 2 })],
-    });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    PbMock.findById.mockReturnValue(mockQuery(null));
-    const res = mockResponse();
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CANCELLED } }),
-      res
-    );
-
-    expect(res.statusCode).toBe(200);
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-  });
-
-  it("restitue l'utilisation du coupon à l'annulation", async () => {
-    const promo = makePromotion({ code: "RENTREE10", usedCount: 3 });
-    const order = makeOrder({
-      status: OrderStatus.CONFIRMED,
-      promotionCode: "RENTREE10",
-      items: [makeOrderItem()],
-    });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    PromotionMock.findOne.mockReturnValue(mockQuery(promo));
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CANCELLED } }),
-      mockResponse()
-    );
-
-    expect(PromotionMock.findOne).toHaveBeenCalledWith({ code: "RENTREE10" });
-    expect(promo.usedCount).toBe(2);
-    expect(promo.save).toHaveBeenCalledWith({ session });
-  });
-
-  it("ne descend pas le compteur d'utilisation en dessous de zéro", async () => {
-    const promo = makePromotion({ code: "RENTREE10", usedCount: 0 });
-    const order = makeOrder({
-      status: OrderStatus.CONFIRMED,
-      promotionCode: "RENTREE10",
-      items: [],
-    });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    PromotionMock.findOne.mockReturnValue(mockQuery(promo));
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CANCELLED } }),
-      mockResponse()
-    );
-
-    expect(promo.usedCount).toBe(0);
-    expect(promo.save).not.toHaveBeenCalled();
-  });
-
-  it("ne cherche aucun coupon quand la commande n'en a pas", async () => {
-    const order = makeOrder({ status: OrderStatus.CONFIRMED, promotionCode: null, items: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: OrderStatus.CANCELLED } }),
-      mockResponse()
-    );
-
-    expect(PromotionMock.findOne).not.toHaveBeenCalled();
   });
 });
 
@@ -841,64 +770,11 @@ describe("historique de statut", () => {
     const history = OrderMock.create.mock.calls[0]![0][0].statusHistory;
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({
-      status: OrderStatus.PENDING,
+      status: OrderStatus.IN_PROGRESS,
       changedBy: userId,
       note: "Commande créée",
     });
     expect(history[0].changedAt).toBeInstanceOf(Date);
-  });
-
-  it("ajoute une entrée à chaque changement de statut", async () => {
-    const order = makeOrder({ status: OrderStatus.PENDING, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-
-    await updateOrderStatus(
-      mockRequest({
-        params: { id: order._id.toString() },
-        body: { status: OrderStatus.CONFIRMED },
-      }),
-      mockResponse()
-    );
-
-    expect(order.statusHistory).toHaveLength(1);
-    expect(order.statusHistory[0]!.status).toBe(OrderStatus.CONFIRMED);
-    expect(order.statusHistory[0]!.changedAt).toBeInstanceOf(Date);
-  });
-
-  it("conserve la note et l'auteur du changement", async () => {
-    const auteur = oid().toString();
-    const order = makeOrder({ status: OrderStatus.CONFIRMED, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-
-    const req = mockRequest({
-      params: { id: order._id.toString() },
-      body: { status: OrderStatus.SHIPPED, note: "Suivi GN-4471" },
-    });
-    (req as any).user = { id: auteur, entityType: "admin" };
-
-    await updateOrderStatus(req, mockResponse());
-
-    expect(order.statusHistory[0]!.note).toBe("Suivi GN-4471");
-    expect(order.statusHistory[0]!.changedBy?.toString()).toBe(auteur);
-  });
-
-  it("empile les transitions successives", async () => {
-    const order = makeOrder({ status: OrderStatus.PENDING, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: "x" }, body: { status: OrderStatus.CONFIRMED } }),
-      mockResponse()
-    );
-    await updateOrderStatus(
-      mockRequest({ params: { id: "x" }, body: { status: OrderStatus.SHIPPED } }),
-      mockResponse()
-    );
-
-    expect(order.statusHistory.map((h) => h.status)).toEqual([
-      OrderStatus.CONFIRMED,
-      OrderStatus.SHIPPED,
-    ]);
   });
 
   it("expose l'historique dans le DTO de réponse", async () => {
@@ -920,61 +796,6 @@ describe("historique de statut", () => {
   });
 });
 
-// ─────────────────────────────────────────────
-//  Transitions de statut autorisées
-// ─────────────────────────────────────────────
-describe("transitions de statut", () => {
-  const transition = async (from: OrderStatus, to: OrderStatus) => {
-    const order = makeOrder({ status: from, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    const res = mockResponse();
-
-    await updateOrderStatus(
-      mockRequest({ params: { id: order._id.toString() }, body: { status: to } }),
-      res
-    );
-
-    return { order, res };
-  };
-
-  it.each([
-    [OrderStatus.PENDING, OrderStatus.CONFIRMED],
-    [OrderStatus.PENDING, OrderStatus.CANCELLED],
-    [OrderStatus.CONFIRMED, OrderStatus.SHIPPED],
-    [OrderStatus.SHIPPED, OrderStatus.DELIVERED],
-  ])("autorise %s vers %s", async (from, to) => {
-    const { order, res } = await transition(from, to);
-
-    expect(res.statusCode).toBe(200);
-    expect(order.status).toBe(to);
-  });
-
-  it.each([
-    [OrderStatus.PENDING, OrderStatus.SHIPPED],
-    [OrderStatus.PENDING, OrderStatus.DELIVERED],
-    [OrderStatus.CONFIRMED, OrderStatus.DELIVERED],
-  ])("refuse le saut %s vers %s", async (from, to) => {
-    const { order, res } = await transition(from, to);
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body.message).toContain("Transition invalide");
-    expect(order.status).toBe(from);
-    expect(order.save).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-    [OrderStatus.CANCELLED, OrderStatus.CONFIRMED],
-  ])("refuse toute sortie du statut terminal %s", async (from, to) => {
-    const { res } = await transition(from, to);
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body.message).toContain("statut terminal");
-  });
-});
-
-// ─────────────────────────────────────────────
-//  Notifications par email
 // ─────────────────────────────────────────────
 describe("emails de commande", () => {
   it("envoie l'email de confirmation après le checkout", async () => {
@@ -1024,41 +845,6 @@ describe("emails de commande", () => {
     expect(session.commitTransaction).toHaveBeenCalled();
   });
 
-  it("notifie le client à chaque changement de statut", async () => {
-    const client = makeUser({ email: "client@example.com" });
-    const order = makeOrder({ status: OrderStatus.PENDING, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-    UserMock.findById.mockReturnValue(mockQuery(client));
-
-    await updateOrderStatus(
-      mockRequest({
-        params: { id: order._id.toString() },
-        body: { status: OrderStatus.CONFIRMED },
-      }),
-      mockResponse()
-    );
-
-    expect(sendOrderStatusMail).toHaveBeenCalledWith(
-      expect.objectContaining({ email: "client@example.com" }),
-      order.reference,
-      OrderStatus.CONFIRMED
-    );
-  });
-
-  it("n'envoie aucun email sur une transition refusée", async () => {
-    const order = makeOrder({ status: OrderStatus.DELIVERED, items: [], statusHistory: [] });
-    OrderMock.findById.mockReturnValue(mockQuery(order));
-
-    await updateOrderStatus(
-      mockRequest({
-        params: { id: order._id.toString() },
-        body: { status: OrderStatus.PENDING },
-      }),
-      mockResponse()
-    );
-
-    expect(sendOrderStatusMail).not.toHaveBeenCalled();
-  });
 });
 
 // ─────────────────────────────────────────────
@@ -1258,18 +1044,190 @@ describe("commandes validées et anciennes commandes", () => {
     expect(res.body.data.shippingFee).toBe(50_000);
     expect(res.body.data.deliveries).toEqual([]);
   });
+});
 
-  it("fait avancer le statut d'une ancienne commande", async () => {
-    const legacy = makeOrder({ deliveryMethod: DeliveryMethod.STANDARD, status: OrderStatus.PENDING });
-    OrderMock.findById.mockReturnValue(mockQuery(legacy));
+// ─────────────────────────────────────────────
+describe("createOrder — sous-commandes et paiement", () => {
+  const userId = oid().toString();
+
+  /** Panier sur deux boutiques : Dépôt Matam (livraison à 50 000) et Coloris (retrait). */
+  const setupTwoShops = () => {
+    const depot = makeShop({
+      nom: "Dépôt Matam",
+      adresse: "Matam, Conakry",
+      delivery: { modes: [DeliveryMethod.FLAT_RATE], flatRateFee: 50_000 },
+    });
+    const coloris = makeShop({
+      nom: "Coloris",
+      adresse: "Ratoma, Conakry",
+      delivery: { modes: [DeliveryMethod.PICKUP], flatRateFee: null },
+    });
+    const pbA = makeProductBoutique({ boutiqueId: depot._id, stock: 10 });
+    const pbB = makeProductBoutique({ boutiqueId: coloris._id, stock: 10 });
+    const items = [
+      makeCartItem({ productBoutiqueId: pbA._id, price: 30_000, quantity: 1 }),
+      makeCartItem({ productBoutiqueId: pbB._id, price: 10_000, quantity: 1 }),
+    ];
+    CartMock.findOne.mockReturnValue(mockQuery(makeCart({ items, amount: 40_000 })));
+    PbMock.find.mockReturnValue(mockQuery([pbA, pbB]));
+    ShopMock.find.mockReturnValue(mockQuery([depot, coloris]));
+    return { depot, coloris };
+  };
+
+  const twoShopCheckout = (over: Record<string, unknown> = {}) =>
+    checkout({
+      deliveryMethod: undefined,
+      deliveries: undefined,
+      ...over,
+    });
+
+  it("découpe la commande en une sous-commande à confirmer par boutique", async () => {
+    const { depot, coloris } = setupTwoShops();
     const res = mockResponse();
 
-    await updateOrderStatus(
-      mockRequest({ params: { id: legacy._id.toString() }, body: { status: OrderStatus.CONFIRMED } }),
+    await createOrder(mockRequest({ params: { userId }, body: twoShopCheckout() }), res);
+
+    expect(res.statusCode).toBe(201);
+    const parts = createdParts();
+    expect(parts).toHaveLength(2);
+    const order = OrderMock.create.mock.calls[0]![0][0];
+
+    const [a, b] = parts;
+    expect(a).toMatchObject({
+      boutiqueId: depot._id,
+      boutiqueNom: "Dépôt Matam",
+      reference: `${order.reference}-1`,
+      subtotal: 30_000,
+      deliveryFee: 50_000,
+      amount: 80_000,
+      status: ShopOrderStatus.PENDING,
+    });
+    expect(b).toMatchObject({
+      boutiqueId: coloris._id,
+      reference: `${order.reference}-2`,
+      subtotal: 10_000,
+      deliveryFee: 0,
+      amount: 10_000,
+      status: ShopOrderStatus.PENDING,
+    });
+    // Un code de remise par sous-commande, et 48 h pour confirmer.
+    expect(a.pickupCode).toMatch(/^\d{6}$/);
+    expect(a.deadlineAt.getTime() - a.statusHistory[0].changedAt.getTime()).toBe(48 * 60 * 60 * 1000);
+    expect(ShopOrderMock.create.mock.calls[0]![1]).toEqual({ session, ordered: true });
+  });
+
+  it("répartit le coupon entre les boutiques au prorata de leurs articles", async () => {
+    setupTwoShops();
+    PromotionMock.findOne.mockReturnValue(
+      mockQuery(
+        makePromotion({
+          code: "MOINS4000",
+          scope: PromotionScope.CART,
+          discountType: DiscountType.FIXED,
+          discountValue: 4_000,
+          startDate: new Date("2000-01-01"),
+          endDate: new Date("2999-01-01"),
+        })
+      )
+    );
+
+    await createOrder(mockRequest({ params: { userId }, body: twoShopCheckout({ code: "MOINS4000" }) }), mockResponse());
+
+    const [a, b] = createdParts();
+    // 30 000 et 10 000 d'articles : 3 000 et 1 000 de réduction.
+    expect(OrderMock.create.mock.calls[0]![0][0].discountAmount).toBe(4_000);
+    expect(a.discountAmount).toBe(3_000);
+    expect(b.discountAmount).toBe(1_000);
+    expect(a.amount).toBe(30_000 - 3_000 + 50_000);
+  });
+
+  it("ne transmet l'adresse du client qu'à la boutique qui livre", async () => {
+    setupTwoShops();
+    const address = makeAddress({ userId: new mongoose.Types.ObjectId(userId) });
+    AddressMock.findById.mockReturnValue(mockQuery(address));
+
+    await createOrder(
+      mockRequest({ params: { userId }, body: twoShopCheckout({ addressId: address._id.toString(), adresse: undefined }) }),
+      mockResponse()
+    );
+
+    const [livraison, retrait] = createdParts();
+    expect(livraison.shippingAddress).toMatchObject({ adresse: address.adresse });
+    expect(retrait.shippingAddress).toBeUndefined();
+  });
+
+  it("prévient chaque boutique de sa nouvelle commande", async () => {
+    setupTwoShops();
+
+    await createOrder(mockRequest({ params: { userId }, body: twoShopCheckout() }), mockResponse());
+
+    expect(deliverNotices).toHaveBeenCalledTimes(2);
+    const [notices] = vi.mocked(deliverNotices).mock.calls[0]!;
+    expect(notices[0]).toMatchObject({ recipient: "shop", title: "Nouvelle commande à confirmer" });
+    expect(sendOrderConfirmationMail).toHaveBeenCalledOnce();
+  });
+
+  it("refuse le paiement en ligne quand aucun prestataire n'est configuré", async () => {
+    setupTwoShops();
+    const res = mockResponse();
+
+    await createOrder(
+      mockRequest({ params: { userId }, body: twoShopCheckout({ paymentMethod: PaymentMethod.ONLINE }) }),
       res
     );
 
-    expect(res.statusCode).toBe(200);
-    expect(legacy.deliveryMethod).toBe(DeliveryMethod.STANDARD);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toContain("paiement en ligne n'est pas encore disponible");
+    expect(OrderMock.create).not.toHaveBeenCalled();
+  });
+
+  describe("paiement en ligne", () => {
+    const initiate = vi.fn();
+
+    beforeEach(() => {
+      initiate.mockResolvedValue({ providerRef: "SBX-1", redirectUrl: "http://localhost/paiement/x" });
+      vi.mocked(getPaymentProvider).mockReturnValue({ name: "sandbox", initiate, refund: vi.fn() } as any);
+    });
+
+    it("met la commande en attente de paiement, invisible des boutiques, et renvoie où payer", async () => {
+      setupTwoShops();
+      const res = mockResponse();
+
+      await createOrder(
+        mockRequest({ params: { userId }, body: twoShopCheckout({ paymentMethod: PaymentMethod.ONLINE }) }),
+        res
+      );
+
+      expect(res.statusCode).toBe(201);
+      const order = OrderMock.create.mock.calls[0]![0][0];
+      expect(order.status).toBe(OrderStatus.AWAITING_PAYMENT);
+      expect(order.paymentStatus).toBe(OrderPaymentStatus.PENDING);
+      // 30 minutes pour payer.
+      expect(order.paymentExpiresAt.getTime() - order.statusHistory[0].changedAt.getTime()).toBe(30 * 60 * 1000);
+      for (const part of createdParts()) {
+        expect(part.status).toBe(ShopOrderStatus.AWAITING_PAYMENT);
+        expect(part.deadlineAt).toBeNull();
+      }
+      expect(initiate).toHaveBeenCalledWith(expect.objectContaining({ amount: order.amount }));
+      expect(res.body.data.payment).toEqual({ redirectUrl: "http://localhost/paiement/x" });
+      // Les boutiques ne sont prévenues qu'au paiement confirmé.
+      expect(deliverNotices).not.toHaveBeenCalled();
+      expect(sendOrderConfirmationMail).not.toHaveBeenCalled();
+    });
+
+    it("annule la commande et restaure le panier quand le prestataire ne répond pas", async () => {
+      setupTwoShops();
+      initiate.mockRejectedValueOnce(new Error("prestataire injoignable"));
+      const res = mockResponse();
+
+      await createOrder(
+        mockRequest({ params: { userId }, body: twoShopCheckout({ paymentMethod: PaymentMethod.ONLINE }) }),
+        res
+      );
+
+      expect(res.statusCode).toBe(502);
+      expect(failOrderPayment).toHaveBeenCalledWith(expect.anything(), "refused");
+      expect(restoreCartAfterFailedPayment).toHaveBeenCalled();
+    });
   });
 });

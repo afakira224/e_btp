@@ -14,6 +14,8 @@ import reviewRouter from './router/review.route.js';
 import addressRouter from './router/address.route.js';
 import recommandationRouter from './router/recommandation.route.js';
 import shopRequestRouter from './router/shopRequest.route.js';
+import shopOrderRouter from './router/shopOrder.route.js';
+import paymentRouter from './router/payment.route.js';
 
 const mainRouter = express.Router();
 
@@ -28,6 +30,8 @@ mainRouter.use('/products', productRouter);
 mainRouter.use('/product-boutiques', productBoutiqueRouter);
 mainRouter.use('/cart', cartRouter);
 mainRouter.use('/orders', orderRouter);
+mainRouter.use('/shop-orders', shopOrderRouter);
+mainRouter.use('/payments', paymentRouter);
 mainRouter.use('/promotions', promotionRouter);
 mainRouter.use('/wishlist', wishlistRouter);
 mainRouter.use('/reviews', reviewRouter);

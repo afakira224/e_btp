@@ -241,6 +241,36 @@ const shopRequestTemplate = ({ title, username, body, cta }: {
   <p style="color:#999;font-size:12px">${APP_NAME}</p>
 </div>`;
 
+// ─────────────────────────────────────────────
+//  AVIS GÉNÉRIQUE
+//  Un titre, quelques paragraphes, un bouton. Tout le texte est échappé :
+//  noms de boutique, motifs et précisions viennent d'utilisateurs.
+// ─────────────────────────────────────────────
+export interface NoticeMail {
+  to: string;
+  subject: string;
+  title: string;
+  /** Nom de la personne saluée ; absent = pas de formule d'appel. */
+  username?: string | undefined;
+  paragraphs: string[];
+  /** Lien relatif à APP_URL (« /compte/commandes/… ») et son libellé. */
+  cta?: { path: string; label: string } | undefined;
+}
+
+export const sendNoticeMail = ({ to, subject, title, username, paragraphs, cta }: NoticeMail): number =>
+  addToQueue({
+    to,
+    subject,
+    html: `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+  <h2>${escapeHtml(title)}</h2>
+  ${username ? `<p>Bonjour <strong>${escapeHtml(username)}</strong>,</p>` : ""}
+  ${paragraphs.map((text) => `<p>${escapeHtml(text)}</p>`).join("\n  ")}
+  ${cta ? `<a href="${APP_URL}${cta.path}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;border-radius:6px;text-decoration:none">${escapeHtml(cta.label)}</a>` : ""}
+  <p style="color:#999;font-size:12px">${APP_NAME}</p>
+</div>`,
+  });
+
 export const sendShopRequestReceivedMail = (user: Pick<IUser, "email" | "nom">, shopName: string): number =>
   addToQueue({
     to:      user.email,

@@ -1,9 +1,9 @@
 import { body, param, type ValidationChain } from "express-validator";
-import { OrderStatus } from "../../models/order.model.js";
+import { PaymentMethod } from "../../models/order.model.js";
 import { deliverySelectionFields } from "./delivery.form.js";
 
 // POST /orders/:userId  (checkout depuis le panier)
-// { addressId?, deliveries?, deliveryMethod?, telephone?, adresse?, code? }
+// { addressId?, deliveries?, deliveryMethod?, telephone?, adresse?, code?, paymentMethod? }
 export const createOrderForm: ValidationChain[] = [
   param("userId")
     .isMongoId().withMessage("Identifiant utilisateur invalide."),
@@ -33,23 +33,12 @@ export const createOrderForm: ValidationChain[] = [
     .optional()
     .trim()
     .isLength({ max: 255 }).withMessage("Maximum 255 caractères."),
-];
 
-// PATCH /orders/:id/status  { status, note? }
-export const updateOrderStatusForm: ValidationChain[] = [
-  param("id")
-    .isMongoId().withMessage("Identifiant de commande invalide."),
-
-  body("status")
-    .notEmpty().withMessage("Le statut est requis.")
-    .isIn(Object.values(OrderStatus))
-    .withMessage(`Statut invalide. Valeurs autorisées : ${Object.values(OrderStatus).join(", ")}.`),
-
-  // Commentaire libre conservé dans l'historique (motif d'annulation, n° de suivi…).
-  body("note")
+  // À la livraison ou au retrait par défaut ; en ligne, via le prestataire.
+  body("paymentMethod")
     .optional()
-    .trim()
-    .isLength({ max: 500 }).withMessage("Maximum 500 caractères."),
+    .isIn(Object.values(PaymentMethod))
+    .withMessage(`Mode de paiement invalide. Valeurs acceptées : ${Object.values(PaymentMethod).join(", ")}.`),
 ];
 
 // Routes avec un simple :id de commande

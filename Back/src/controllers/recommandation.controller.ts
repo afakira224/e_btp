@@ -6,7 +6,7 @@ import { Categorie } from "../models/categorie.model.js";
 import { SousCategorie } from "../models/sousCategorie.model.js";
 import { Complementarite } from "../models/complementarite.model.js";
 import { User } from "../models/user.model.js";
-import { Order, OrderStatus } from "../models/order.model.js";
+import { Order, ORDER_STATUSES_WITHOUT_SALE } from "../models/order.model.js";
 import { Cart } from "../models/cart.model.js";
 import { Wishlist } from "../models/wishlist.model.js";
 import { RecentlyViewed } from "../models/recentlyViewed.model.js";
@@ -93,7 +93,7 @@ async function chargerClient(userId: string | undefined, vusLocaux: string[]): P
 
   const [user, commandes, panier, favoris, vus] = await Promise.all([
     User.findById(userId).select("projet").lean(),
-    Order.find({ userId, status: { $ne: OrderStatus.CANCELLED } })
+    Order.find({ userId, status: { $nin: ORDER_STATUSES_WITHOUT_SALE } })
       .sort({ createdAt: -1 })
       .limit(10)
       .select("items.productBoutiqueId")

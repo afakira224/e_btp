@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import mongoose, { Types } from "mongoose";
 import { pathToFileURL } from "node:url";
 import { DB_CONNECT } from "../db/db.js";
-import { Order, OrderStatus } from "../models/order.model.js";
+import { Order, ORDER_STATUSES_WITHOUT_SALE } from "../models/order.model.js";
 import { Product } from "../models/product.model.js";
 import { Complementarite, OrigineComplementarite } from "../models/complementarite.model.js";
 import { apprendreDesCommandes, APPRENTISSAGE_PAR_DEFAUT, type LienRayons } from "../shared/recommandation/complements.js";
@@ -36,7 +36,7 @@ export const rayonsDesCommandes = async (lot = 2_000): Promise<string[][]> => {
     page = [];
   };
 
-  const curseur = Order.find({ status: { $ne: OrderStatus.CANCELLED } }).select("items.productId").lean().cursor();
+  const curseur = Order.find({ status: { $nin: ORDER_STATUSES_WITHOUT_SALE } }).select("items.productId").lean().cursor();
   for await (const commande of curseur) {
     page.push(commande.items.flatMap((i) => (i.productId ? [i.productId] : [])));
     if (page.length >= lot) await traduire();

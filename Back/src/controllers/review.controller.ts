@@ -4,7 +4,7 @@ import { validationResult } from "express-validator";
 import { Review } from "../models/review.model.js";
 import { productBoutique } from "../models/product.model.js";
 import { User } from "../models/user.model.js";
-import { Order, OrderStatus } from "../models/order.model.js";
+import { Order, ORDER_STATUSES_WITHOUT_SALE } from "../models/order.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { toReviewResponseDto, type ReviewSummaryDto } from "../shared/interfaces/Review.interfaces.js";
@@ -74,7 +74,7 @@ export const createReview = async (req: Request, res: Response) => {
     const purchase = await Order.findOne({
       userId,
       "items.productBoutiqueId": productBoutiqueId,
-      status: { $ne: OrderStatus.CANCELLED },
+      status: { $nin: ORDER_STATUSES_WITHOUT_SALE },
     }).session(session);
 
     const [review] = await Review.create(

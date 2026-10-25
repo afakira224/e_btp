@@ -6,13 +6,46 @@ import { DeliveryMethod, orderDeliverySchema, type IOrderDelivery } from "./deli
 //  ORDER
 //  Une commande appartient à un utilisateur. Ses items sont un instantané
 //  (snapshot) du panier au moment du checkout : prix et infos produit figés.
+//
+//  Son avancement vit dans ses sous-commandes, une par boutique
+//  (shopOrder.model.ts). Le statut de la commande n'est choisi par personne :
+//  il se déduit de celui de ses sous-commandes (orderStatusFrom).
 // ─────────────────────────────────────────────
 export enum OrderStatus {
+  AWAITING_PAYMENT = "awaiting_payment", // paiement en ligne lancé, pas encore confirmé
+  PAYMENT_FAILED = "payment_failed",     // paiement refusé ou expiré : la commande ne part pas
+  IN_PROGRESS = "in_progress",           // au moins une sous-commande n'est pas terminée
+  COMPLETED = "completed",               // toutes terminées, toutes positives
+  PARTIALLY_COMPLETED = "partially_completed", // toutes terminées, positives et négatives
+  CANCELLED = "cancelled",               // toutes terminées, toutes négatives
+
+  // Statuts des commandes passées avant les sous-commandes. Lisibles ;
+  // `npm run migrate:shop-orders` les convertit.
   PENDING = "pending",
   CONFIRMED = "confirmed",
   SHIPPED = "shipped",
   DELIVERED = "delivered",
-  CANCELLED = "cancelled",
+}
+
+/** Une commande dans l'un de ces statuts n'a abouti à aucune vente. */
+export const ORDER_STATUSES_WITHOUT_SALE: readonly OrderStatus[] = [
+  OrderStatus.AWAITING_PAYMENT,
+  OrderStatus.PAYMENT_FAILED,
+  OrderStatus.CANCELLED,
+];
+
+/** Comment le client paie : à la remise (livraison ou retrait), ou en ligne. */
+export enum PaymentMethod {
+  ON_DELIVERY = "on_delivery",
+  ONLINE = "online",
+}
+
+/** Paiement de la commande. En ligne : un paiement pour toute la commande. */
+export enum OrderPaymentStatus {
+  ON_DELIVERY = "on_delivery", // chaque boutique encaisse sa part à la remise
+  PENDING = "pending",         // paiement en ligne lancé, pas encore confirmé
+  PAID = "paid",               // confirmé par le prestataire
+  FAILED = "failed",           // refusé ou expiré
 }
 
 // ─────────────────────────────────────────────
@@ -21,15 +54,6 @@ export enum OrderStatus {
 //  les importent.
 // ─────────────────────────────────────────────
 export { DeliveryMethod } from "./delivery.model.js";
-
-// Transitions de statut autorisées. Une commande livrée ou annulée est terminale.
-export const ALLOWED_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-  [OrderStatus.CONFIRMED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-  [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-  [OrderStatus.DELIVERED]: [],
-  [OrderStatus.CANCELLED]: [],
-};
 
 export interface IOrderItem {
   productBoutiqueId: Types.ObjectId;
@@ -63,6 +87,13 @@ export interface IShippingAddress {
 export interface IOrder extends Document, BaseModel {
   userId: Types.ObjectId;
   reference: string;
+  paymentMethod: PaymentMethod;
+  paymentStatus: OrderPaymentStatus;
+  /** Référence du paiement chez le prestataire (paiement en ligne). */
+  paymentRef?: string | null;
+  /** Au-delà, un paiement en ligne non confirmé échoue et le stock est rendu. */
+  paymentExpiresAt?: Date | null;
+  paidAt?: Date | null;
   items: IOrderItem[];
   subtotal: number; // somme des (price * quantity) avant réduction
   discountAmount: number; // réduction appliquée (coupon)
@@ -82,7 +113,7 @@ export interface IOrder extends Document, BaseModel {
   adresse?: string | undefined;
 }
 
-const orderItemSchema = new Schema<IOrderItem>(
+export const orderItemSchema = new Schema<IOrderItem>(
   {
     productBoutiqueId: { type: Types.ObjectId, required: true, ref: "product_boutique" },
     boutiqueId: { type: Types.ObjectId, ref: "shop" },
@@ -105,7 +136,7 @@ const orderStatusHistorySchema = new Schema<IOrderStatusHistory>(
   { _id: false }
 );
 
-const shippingAddressSchema = new Schema<IShippingAddress>(
+export const shippingAddressSchema = new Schema<IShippingAddress>(
   {
     destinataire: { type: String, trim: true },
     telephone: { type: String, required: true, trim: true },
@@ -121,6 +152,19 @@ const orderSchema = new Schema<IOrder>(
   {
     userId: { type: Types.ObjectId, required: true, ref: "user" },
     reference: { type: String, required: true, unique: true },
+    paymentMethod: {
+      type: String,
+      enum: Object.values(PaymentMethod),
+      default: PaymentMethod.ON_DELIVERY,
+    },
+    paymentStatus: {
+      type: String,
+      enum: Object.values(OrderPaymentStatus),
+      default: OrderPaymentStatus.ON_DELIVERY,
+    },
+    paymentRef: { type: String, default: null },
+    paymentExpiresAt: { type: Date, default: null },
+    paidAt: { type: Date, default: null },
     items: { type: [orderItemSchema], required: true },
     subtotal: { type: Number, required: true, min: 0, default: 0 },
     discountAmount: { type: Number, min: 0, default: 0 },
@@ -130,7 +174,7 @@ const orderSchema = new Schema<IOrder>(
     status: {
       type: String,
       enum: Object.values(OrderStatus),
-      default: OrderStatus.PENDING,
+      default: OrderStatus.IN_PROGRESS,
     },
     statusHistory: { type: [orderStatusHistorySchema], default: [] },
     deliveryMethod: {
@@ -154,6 +198,8 @@ const orderSchema = new Schema<IOrder>(
 orderSchema.index({ userId: 1, createdAt: -1 });
 // Tableau de bord back-office : filtrage par statut.
 orderSchema.index({ status: 1, createdAt: -1 });
+// Tâche des délais : paiements en ligne à faire échouer.
+orderSchema.index({ status: 1, paymentExpiresAt: 1 });
 
 orderSchema.pre(/^find/, function (this: mongoose.Query<unknown, IOrder>) {
   this.where({ deletedAt: null });

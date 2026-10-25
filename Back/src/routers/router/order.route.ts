@@ -6,13 +6,8 @@ import {
   deleteOrder,
   getOrderById,
   getOrders,
-  updateOrderStatus,
 } from "../../controllers/order.controller.js";
-import {
-  createOrderForm,
-  orderIdParam,
-  updateOrderStatusForm,
-} from "../../shared/forms/order.form.js";
+import { createOrderForm, orderIdParam } from "../../shared/forms/order.form.js";
 
 const orderRouter = Router();
 
@@ -22,15 +17,19 @@ const orderRouter = Router();
  *   get:
  *     tags: [Order]
  *     summary: Lister les commandes
+ *     description: >
+ *       Un client ne voit que ses commandes, userId ou non ; l'administration
+ *       voit celles de tous, ou d'un client avec userId. Chaque commande porte
+ *       ses sous-commandes (`parts`), une par boutique.
  *     parameters:
  *       - in: query
  *         name: userId
  *         schema: { type: string }
- *         description: Filtrer par utilisateur
+ *         description: Filtrer par utilisateur (administration)
  *       - in: query
  *         name: status
- *         schema: { type: string, enum: [pending, confirmed, shipped, delivered, cancelled] }
- *         description: Filtrer par statut
+ *         schema: { type: string, enum: [awaiting_payment, payment_failed, in_progress, completed, partially_completed, cancelled] }
+ *         description: Filtrer par statut de la commande
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
@@ -85,6 +84,9 @@ orderRouter.get("/:id", requireAuth, orderIdParam, getOrderById);
  *       articles de la boutique acceptent (voir POST /cart/{userId}/delivery-quote),
  *       et figé dans `deliveries` avec ses frais. Les frais sont calculés par le
  *       serveur : tout montant envoyé par le client est ignoré.
+ *       La commande est découpée en une sous-commande par boutique (`parts`).
+ *       `paymentMethod: online` : la commande attend son paiement 30 minutes au
+ *       plus, et la réponse porte `payment.redirectUrl`, la page où payer.
  *     parameters:
  *       - in: path
  *         name: userId
@@ -112,6 +114,7 @@ orderRouter.get("/:id", requireAuth, orderIdParam, getOrderById);
  *               telephone: { type: string, example: "+224620000000" }
  *               adresse: { type: string, example: Conakry, Ratoma }
  *               code: { type: string, example: RENTREE20, description: "Code promo optionnel appliqué à la commande" }
+ *               paymentMethod: { type: string, enum: [on_delivery, online], default: on_delivery }
  *     responses:
  *       201:
  *         description: Commande créée
@@ -131,48 +134,8 @@ orderRouter.get("/:id", requireAuth, orderIdParam, getOrderById);
  */
 orderRouter.post("/:userId", requireAuth, requireSelf(), createOrderForm, createOrder);
 
-/**
- * @swagger
- * /orders/{id}/status:
- *   patch:
- *     tags: [Order]
- *     summary: Mettre à jour le statut d'une commande
- *     description: Passer une commande à "cancelled" restitue automatiquement le stock.
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: string }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [status]
- *             properties:
- *               status:
- *                 type: string
- *                 enum: [pending, confirmed, shipped, delivered, cancelled]
- *                 example: confirmed
- *     responses:
- *       200:
- *         description: Statut mis à jour
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/BaseSuccess' }
- *       400:
- *         description: Statut invalide ou identique
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/BaseError' }
- *       404:
- *         description: Commande non trouvée
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/BaseError' }
- */
-orderRouter.patch("/:id/status", requireAuth, requireRole(EntityType.ADMIN, EntityType.SHOP), updateOrderStatusForm, updateOrderStatus);
+// Le statut d'une commande ne se change plus ici : il se déduit de ses
+// sous-commandes, que l'on fait avancer par /shop-orders/{id}/{action}.
 
 /**
  * @swagger
