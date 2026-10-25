@@ -3,6 +3,10 @@ const shop = (shopId: string) => `/ma-boutique/${encodeURIComponent(shopId)}`;
 
 export const sellerPaths = {
   home: "/ma-boutique",
+  /** Connexion propre à l'espace boutique. */
+  login: "/ma-boutique/connexion",
+  /** Tableau de bord : l'accueil d'une boutique. */
+  dashboard: (shopId: string) => shop(shopId),
   products: (shopId: string) => `${shop(shopId)}/produits`,
   newProduct: (shopId: string) => `${shop(shopId)}/produits/nouveau`,
   editProduct: (shopId: string, offerId: string) =>

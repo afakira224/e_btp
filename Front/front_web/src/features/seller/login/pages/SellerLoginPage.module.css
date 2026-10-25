@@ -1,0 +1,175 @@
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  min-height: 100vh;
+  background: var(--color-background);
+}
+
+/* ── Colonne sombre : l'identité de l'espace boutique ── */
+.intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  background: var(--color-nav);
+  color: var(--color-nav-text);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-nav-text);
+  text-decoration: none;
+}
+
+.mark {
+  display: inline-grid;
+  place-items: center;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-nav-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.pitch {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 440px;
+}
+
+.pitchTitle {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+}
+
+.points {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.points li {
+  position: relative;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-nav-muted);
+}
+
+.points li::before {
+  content: "";
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: 10px;
+  height: 1px;
+  background: var(--color-nav-text);
+}
+
+.small {
+  font-size: var(--text-xs);
+  color: var(--color-nav-muted);
+}
+
+/* ── Colonne claire : le formulaire ── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5) var(--space-6);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.siteLink {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.siteLink:hover {
+  color: var(--color-text);
+}
+
+.card {
+  display: grid;
+  gap: var(--space-3);
+  width: min(100%, 420px);
+  margin: auto;
+  padding: var(--space-6) 0;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  color: var(--color-text);
+}
+
+.subtitle {
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.footer {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.footer a {
+  color: var(--color-text);
+}
+
+@media (max-width: 860px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .intro {
+    gap: var(--space-4);
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .pitch {
+    gap: var(--space-3);
+  }
+
+  .pitchTitle {
+    font-size: var(--text-xl);
+  }
+
+  .points,
+  .small {
+    display: none;
+  }
+
+  .panel {
+    padding: var(--space-4);
+  }
+}

@@ -11,15 +11,16 @@ import { RouteFallback } from "./RouteFallback";
 //
 //  Au moment de la connexion, cette garde se rend avec le nouvel état avant
 //  que la navigation de useLogin n'aboutisse : elle doit donc viser la même
-//  destination, sinon sa redirection écrase la page demandée.
+//  destination (`destination` = celle donnée au formulaire), sinon sa
+//  redirection écrase la page demandée.
 // ─────────────────────────────────────────────
-export const GuestGuard = () => {
+export const GuestGuard = ({ destination }: { destination?: string | undefined }) => {
   const { status, user } = useAuth();
   const location = useLocation();
 
   if (status === "pending") return <RouteFallback />;
   if (status === "authenticated" && user) {
-    return <Navigate to={afterLoginPath(location.state, user)} replace />;
+    return <Navigate to={afterLoginPath(location.state, user, destination)} replace />;
   }
 
   return <Outlet />;

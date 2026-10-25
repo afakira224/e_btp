@@ -5,12 +5,13 @@ import { useAuth } from "../../../auth";
 // ─────────────────────────────────────────────
 //  SellerGuard
 //  Placée sous AuthGuard : la session est déjà connue. Seuls les comptes
-//  boutique et l'administration entrent ; les autres retrouvent leur compte.
+//  boutique et l'administration entrent ; un client est envoyé vers sa
+//  demande d'ouverture de boutique — c'est ce qui lui manque pour entrer.
 //  Ce n'est qu'un confort d'affichage : le back refuse de lui-même toute
 //  écriture hors rôle (requireRole) ou hors de ses boutiques (canManageShop).
 // ─────────────────────────────────────────────
 export const SellerGuard = () => {
   const { user } = useAuth();
   const allowed = user?.role === EntityType.SHOP || user?.role === EntityType.ADMIN;
-  return allowed ? <Outlet /> : <Navigate to="/compte" replace />;
+  return allowed ? <Outlet /> : <Navigate to="/compte/boutique" replace />;
 };

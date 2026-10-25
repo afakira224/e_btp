@@ -1,32 +1,177 @@
-/* Onglets soulignés, posés sur le filet de l'en-tête. */
-.tabs {
+/* Menu latéral fixe sous la barre ; le contenu défile à côté. */
+.shell {
+  --sidebar-width: 248px;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: calc(100vh - var(--console-bar));
+}
+
+/* ── Menu latéral ───────────────────────────── */
+.sidebar {
+  position: sticky;
+  top: var(--console-bar);
   display: flex;
+  flex-direction: column;
   gap: var(--space-5);
-  margin-bottom: var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-  overflow-x: auto;
-  scrollbar-width: none;
+  height: calc(100vh - var(--console-bar));
+  padding: var(--space-5) var(--space-3);
+  overflow-y: auto;
+  background: var(--color-nav);
+  color: var(--color-nav-text);
 }
 
-.tab {
-  padding: var(--space-2) 0 var(--space-3);
+.shop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-nav-border);
+}
+
+.logo {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--color-nav-hover);
+  object-fit: cover;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.shopText {
+  display: grid;
+  min-width: 0;
+}
+
+.shopName {
+  overflow: hidden;
   font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  text-decoration: none;
+  font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color var(--transition);
 }
 
-.tab:hover {
+.shopAddress {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  color: var(--color-nav-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav {
+  display: grid;
+  gap: 2px;
+}
+
+.item,
+.footerLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-nav-muted);
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.item:hover,
+.footerLink:hover {
+  background: var(--color-nav-hover);
+  color: var(--color-nav-text);
+}
+
+/* Item actif : la surface claire de la charte, comme un onglet posé sur le contenu. */
+.active,
+.active:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+}
+
+.label {
+  flex: 1;
+}
+
+.badge {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-warning-surface);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-warning);
+}
+
+.footer {
+  display: grid;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-nav-border);
+}
+
+/* ── Contenu ────────────────────────────────── */
+.content {
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-7);
+}
+
+.head {
+  margin-bottom: var(--space-5);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
   color: var(--color-text);
 }
 
-/* Trait intérieur : un pseudo-élément sous le filet déborderait du
-   conteneur défilant et ferait apparaître une barre de défilement. */
-.active {
+.lede {
+  margin-top: var(--space-1);
+  max-width: 62ch;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.mobileBar,
+.backdrop {
+  display: none;
+}
+
+/* ── États seuls (chargement, erreur) ───────── */
+.solo {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+
+.back {
+  justify-self: start;
+  font-size: var(--text-sm);
   color: var(--color-text);
-  box-shadow: inset 0 -2px 0 var(--color-primary);
 }
 
 .skeleton {
@@ -48,15 +193,75 @@
   }
 }
 
-.storefront {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--color-text);
-  text-decoration: none;
-  white-space: nowrap;
+/* ── Mobile : le menu devient un tiroir ─────── */
+@media (max-width: 960px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    top: var(--console-bar);
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: min(300px, 86vw);
+    height: auto;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+  }
+
+  .open {
+    transform: none;
+  }
+
+  .backdrop {
+    position: fixed;
+    inset: var(--console-bar) 0 0;
+    z-index: 45;
+    display: block;
+    border: 0;
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .content {
+    padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+
+  .mobileBar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .menuButton {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .mobileShop {
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
-.storefront:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }

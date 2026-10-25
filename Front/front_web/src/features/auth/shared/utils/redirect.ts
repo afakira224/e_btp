@@ -18,11 +18,12 @@ export const homeOf = (user: User): string => {
 
 /**
  * Où aller une fois connecté : la page demandée avant la redirection vers
- * /login, sinon l'accueil du compte. useLogin et GuestGuard doivent viser la
+ * /login, sinon `fallback` (l'accueil du compte par défaut ; l'espace boutique
+ * depuis sa propre page de connexion). useLogin et GuestGuard doivent viser la
  * même destination : à la connexion, les deux naviguent dans le même rendu,
  * et c'est le dernier qui gagne.
  */
-export const afterLoginPath = (state: unknown, user: User): string => {
+export const afterLoginPath = (state: unknown, user: User, fallback?: string): string => {
   const from = (state as FromState | null)?.from;
-  return from?.pathname ? `${from.pathname}${from.search ?? ""}` : homeOf(user);
+  return from?.pathname ? `${from.pathname}${from.search ?? ""}` : (fallback ?? homeOf(user));
 };

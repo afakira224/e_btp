@@ -204,7 +204,9 @@ toujours vers `/` écrasait la page demandée.
 | `/compte` | Espace compte | Authentifié |
 | `/compte/boutique/demande` | Questionnaire d'ouverture de boutique | Authentifié |
 | `/compte/boutique` | Suivi de la demande : issue, réponses, historique | Authentifié |
-| `/ma-boutique` | Espace vendeur : choix de la boutique (entrée directe s'il n'y en a qu'une) | Boutique, admin |
+| `/ma-boutique/connexion` | Connexion de l'espace boutique | Visiteur |
+| `/ma-boutique` | Espace boutique : choix de la boutique (entrée directe s'il n'y en a qu'une) | Boutique, admin |
+| `/ma-boutique/:boutiqueId` | Tableau de bord : commandes par étape, file à confirmer, problèmes, stock bas | Boutique, admin |
 | `/ma-boutique/:boutiqueId/commandes` | Commandes de la boutique, par onglet (à confirmer, en préparation…) | Boutique, admin |
 | `/ma-boutique/:boutiqueId/commandes/:partId` | Une commande : confirmer, expédier, remettre, répondre à un retour | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits` | Produits de la boutique et provenance de leur livraison | Boutique, admin |
@@ -494,12 +496,32 @@ Le téléphone de la boutique n'est ni demandé ni modifiable (voir
 `entities/shop`) : l'administration recontacte le demandeur par le téléphone
 de son compte.
 
-## Espace vendeur « Ma boutique »
+## Espace boutique
 
-Réservé aux comptes `shop` et `admin` (`SellerGuard`), sous `AuthGuard`. On y
-entre depuis « Mon compte ». Le back reste seul juge : il refuse toute écriture
-sur la boutique d'un autre (`canManageShop`) ; le front se contente de ne pas
-proposer de formulaire inutile.
+Une **application de travail à part du site marchand** : ni bandeau
+promotionnel, ni recherche, ni panier. Barre sombre en haut (marque, compte,
+thème, déconnexion), menu latéral sombre (tableau de bord, commandes avec le
+nombre à traiter, produits, livraison, informations, lien vers la vitrine),
+contenu clair : l'architecture « header + sidebar » de la charte graphique.
+Sur mobile, le menu devient un tiroir.
+
+- **Connexion** : `/ma-boutique/connexion`, avec sa propre page. Même compte et
+  même session que le site ; un gérant qui se connecte depuis le site arrive
+  aussi ici. Un visiteur qui ouvre une page de l'espace y est renvoyé, puis
+  ramené à la page demandée. Un client sans boutique est conduit vers sa
+  demande d'ouverture (`/compte/boutique`).
+- **Tableau de bord** : le nombre de commandes à chaque étape (à confirmer et
+  problèmes signalés dès qu'il y en a), les commandes à confirmer avec leur
+  échéance, les problèmes en cours, les produits en stock bas, des raccourcis.
+- **Commandes** : voir « Cycle de vie des commandes ». Le compteur du menu se
+  relit après chaque action et toutes les 2 minutes.
+- « Se déconnecter » ramène à la connexion de l'espace ; la page quittée n'est
+  pas proposée au compte suivant.
+
+Réservé aux comptes `shop` et `admin` (`SellerGuard`), sous `AuthGuard`. Le back
+reste seul juge : il refuse toute écriture sur la boutique d'un autre
+(`canManageShop`) ; le front se contente de ne pas proposer de formulaire
+inutile.
 
 - **Informations** : nom, présentation, email de contact, adresse et logo,
   envoyés en multipart à `PUT /shops/:id`. L'adresse ne peut pas être retirée
@@ -598,8 +620,10 @@ src/
 │   ├── cart/               Panier, choix de livraison par boutique, tunnel de commande, page de paiement
 │   ├── orders/             Cycle de vie des commandes, partagé par le compte, la boutique et l'administration
 │   │   └── shared/         API, bloc d'une sous-commande, actions, historique, tableau à onglets
-│   ├── seller/             Espace « Ma boutique »
-│   │   ├── shared/         API, garde, ossature, éditeur des modes, règles
+│   ├── seller/             Espace boutique, application à part du site
+│   │   ├── shared/         API, garde, ossature (barre, menu latéral), éditeur des modes, règles
+│   │   ├── login/          Connexion de l'espace boutique
+│   │   ├── dashboard/      Tableau de bord
 │   │   ├── shops/          Choix de la boutique
 │   │   ├── orders/         Commandes de la boutique
 │   │   ├── delivery/       Livraison par défaut de la boutique

@@ -40,6 +40,11 @@ export interface AuthContextValue {
   user: User | null;
   status: AuthStatus;
   isAuthenticated: boolean;
+  /**
+   * La session vient d'être fermée par « Se déconnecter » : la page quittée
+   * n'est pas une destination à proposer au prochain compte qui se connecte.
+   */
+  signedOut: boolean;
   /** Enregistre le profil renvoyé par /auth/login dans le contexte. */
   setUser: (user: User) => void;
   /** Ferme la session côté serveur puis vide le contexte. */

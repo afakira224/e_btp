@@ -4,8 +4,15 @@
   gap: var(--space-2);
 }
 
-.danger {
+/* Le survol d'un bouton discret ne doit pas effacer le rouge d'une action
+   destructrice : la sélection double la spécificité de .ghost:hover. */
+.danger.danger,
+.danger.danger:hover:not(:disabled) {
   color: var(--color-danger);
+}
+
+.danger.danger:hover:not(:disabled) {
+  background: var(--color-danger-surface);
 }
 
 .form {

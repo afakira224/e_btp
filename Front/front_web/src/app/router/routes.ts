@@ -14,8 +14,10 @@ export const ROUTES = {
   // Ouverture d'une boutique : questionnaire, puis suivi de la demande.
   accountShopRequest: "/compte/boutique",
   accountShopRequestNew: "/compte/boutique/demande",
-  // Espace vendeur : une boutique, ses commandes, ses produits et ses modes de livraison.
+  // Espace boutique : application à part, avec sa connexion. Une boutique =
+  // un tableau de bord, ses commandes, ses produits et ses modes de livraison.
   seller: "/ma-boutique",
+  sellerLogin: "/ma-boutique/connexion",
   sellerShop: "/ma-boutique/:boutiqueId",
   sellerOrders: "/ma-boutique/:boutiqueId/commandes",
   sellerOrder: "/ma-boutique/:boutiqueId/commandes/:partId",

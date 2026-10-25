@@ -10,7 +10,7 @@ export {
   passwordSchema,
   resendVerificationRequest,
 } from "./shared";
-export { LoginPage } from "./login";
+export { LoginForm, LoginPage } from "./login";
 export { SignupPage } from "./signup";
 export { ForgotPasswordPage, ResetPasswordPage } from "./forgot-password";
 export { VerifyEmailPage } from "./verify-email";

@@ -16,9 +16,10 @@ export {
 export { DeliveryModesEditor } from "./components/DeliveryModesEditor";
 export { DeliverySummary } from "./components/DeliverySummary";
 export { SellerGuard } from "./components/SellerGuard";
-export { SellerHeader } from "./components/SellerHeader";
+export { SellerConsoleLayout } from "./components/SellerConsoleLayout";
 export { SellerShopLayout } from "./components/SellerShopLayout";
 export { useSellerShop, type SellerShopContext } from "./hooks/useSellerShop";
+export { useShopOrderCounts } from "./hooks/useShopOrderCounts";
 export { sellerPaths } from "./utils/paths";
 export {
   deliveryIssues,

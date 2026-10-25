@@ -43,8 +43,11 @@ import {
 import {
   OfferFormPage,
   OffersPage,
+  SellerConsoleLayout,
+  SellerDashboardPage,
   SellerGuard,
   SellerHomePage,
+  SellerLoginPage,
   SellerShopLayout,
   ShopDeliveryPage,
   ShopInfoPage,
@@ -69,6 +72,31 @@ export const AppRouter = () => (
       {/* La vérification d'email s'ouvre depuis un lien : elle doit
           fonctionner que l'on soit connecté ou non. */}
       <Route path={ROUTES.verifyEmail} element={<VerifyEmailPage />} />
+
+      {/* Espace boutique : une application à part du site marchand, avec sa
+          connexion, sa barre et son menu latéral. Un visiteur est renvoyé
+          vers sa connexion ; un client sans boutique, vers sa demande
+          d'ouverture (SellerGuard). */}
+      <Route element={<GuestGuard destination={ROUTES.seller} />}>
+        <Route path={ROUTES.sellerLogin} element={<SellerLoginPage />} />
+      </Route>
+      <Route element={<AuthGuard loginPath={ROUTES.sellerLogin} />}>
+        <Route element={<SellerGuard />}>
+          <Route element={<SellerConsoleLayout />}>
+            <Route path={ROUTES.seller} element={<SellerHomePage />} />
+            <Route path={ROUTES.sellerShop} element={<SellerShopLayout />}>
+              <Route index element={<SellerDashboardPage />} />
+              <Route path={ROUTES.sellerOrders} element={<ShopOrdersPage />} />
+              <Route path={ROUTES.sellerOrder} element={<ShopOrderPage />} />
+              <Route path={ROUTES.sellerProducts} element={<OffersPage />} />
+              <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
+              <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
+              <Route path={ROUTES.sellerDelivery} element={<ShopDeliveryPage />} />
+              <Route path={ROUTES.sellerInfo} element={<ShopInfoPage />} />
+            </Route>
+          </Route>
+        </Route>
+      </Route>
 
       {/* Pages publiques du site, sous l'ossature commune : l'en-tête et le
           pied de page ne sont montés qu'une fois pour toutes. */}
@@ -109,22 +137,6 @@ export const AppRouter = () => (
           <Route path={ROUTES.accountSettings} element={<SettingsPage />} />
           <Route path={ROUTES.accountShopRequest} element={<ShopRequestStatusPage />} />
           <Route path={ROUTES.accountShopRequestNew} element={<ShopRequestFormPage />} />
-
-          {/* Espace vendeur : comptes boutique et administration seulement.
-              Une boutique = une ossature (en-tête, onglets) et ses rubriques. */}
-          <Route element={<SellerGuard />}>
-            <Route path={ROUTES.seller} element={<SellerHomePage />} />
-            <Route path={ROUTES.sellerShop} element={<SellerShopLayout />}>
-              <Route index element={<Navigate to="commandes" replace />} />
-              <Route path={ROUTES.sellerOrders} element={<ShopOrdersPage />} />
-              <Route path={ROUTES.sellerOrder} element={<ShopOrderPage />} />
-              <Route path={ROUTES.sellerProducts} element={<OffersPage />} />
-              <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
-              <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
-              <Route path={ROUTES.sellerDelivery} element={<ShopDeliveryPage />} />
-              <Route path={ROUTES.sellerInfo} element={<ShopInfoPage />} />
-            </Route>
-          </Route>
 
           {/* Administration : comptes admin seulement. L'accueil de l'espace
               est la file des demandes de boutique à examiner ; les commandes

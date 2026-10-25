@@ -19,6 +19,7 @@ import { AuthContext } from "./AuthContext";
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUserState] = useState<User | null>(null);
   const [status, setStatus] = useState<AuthStatus>("pending");
+  const [signedOut, setSignedOut] = useState(false);
 
   const loadCurrentUser = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -56,6 +57,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setUser = useCallback((profile: User) => {
     setUserState(profile);
     setStatus("authenticated");
+    setSignedOut(false);
   }, []);
 
   const logout = useCallback(async () => {
@@ -66,6 +68,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // connecté : le cookie a peut-être déjà expiré côté serveur.
       setUserState(null);
       setStatus("anonymous");
+      setSignedOut(true);
     }
   }, []);
 
@@ -76,11 +79,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       user,
       status,
       isAuthenticated: status === "authenticated",
+      signedOut,
       setUser,
       logout,
       refresh,
     }),
-    [logout, refresh, setUser, status, user]
+    [logout, refresh, setUser, signedOut, status, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

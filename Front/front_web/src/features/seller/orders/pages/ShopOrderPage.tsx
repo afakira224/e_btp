@@ -11,7 +11,7 @@ import styles from "./ShopOrderPage.module.css";
 //  expédie, remet (avec le code du client) ou répond à un retour.
 // ─────────────────────────────────────────────
 export const ShopOrderPage = () => {
-  const { shop } = useSellerShop();
+  const { shop, refreshOrderCounts } = useSellerShop();
   const { partId = "" } = useParams<{ partId: string }>();
   const { part, isLoading, error, replace } = useShopOrder(partId);
 
@@ -55,7 +55,14 @@ export const ShopOrderPage = () => {
   return (
     <div className={styles.page}>
       {back}
-      <ShopOrderDetail part={part} viewer="shop" onUpdated={replace} />
+      <ShopOrderDetail
+        part={part}
+        viewer="shop"
+        onUpdated={(next) => {
+          replace(next);
+          refreshOrderCounts();
+        }}
+      />
     </div>
   );
 };

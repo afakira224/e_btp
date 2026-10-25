@@ -8,8 +8,8 @@ import styles from "./LoginForm.module.css";
 
 const INITIAL_VALUES: LoginValues = { email: "", password: "" };
 
-export const LoginForm = () => {
-  const { submit, error, needsVerification } = useLogin();
+export const LoginForm = ({ destination }: { destination?: string | undefined } = {}) => {
+  const { submit, error, needsVerification } = useLogin(destination);
   const { values, errorOf, isSubmitting, setValue, handleBlur, handleSubmit } = useForm({
     initialValues: INITIAL_VALUES,
     schema: loginSchema,

@@ -12,7 +12,9 @@ export const LoginPage = () => (
       <>
         Pas encore de compte ? <Link to="/signup">Créer un compte</Link>
         <br />
-        Vous êtes commerçant ? Connectez-vous, puis ouvrez votre boutique depuis votre profil.
+        Vous gérez une boutique ? <Link to="/ma-boutique/connexion">Espace boutique</Link>
+        <br />
+        Vous êtes commerçant sans boutique ? Connectez-vous, puis ouvrez-la depuis votre profil.
       </>
     }
   >
