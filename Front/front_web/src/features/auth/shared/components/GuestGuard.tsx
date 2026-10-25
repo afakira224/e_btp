@@ -1,18 +1,26 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { afterLoginPath } from "../utils/redirect";
 import { RouteFallback } from "./RouteFallback";
 
 // ─────────────────────────────────────────────
 //  GuestGuard
 //  Réserve les écrans d'auth aux visiteurs : un utilisateur déjà connecté
-//  qui ouvre /login est renvoyé vers l'accueil plutôt que de voir un
+//  qui ouvre /login est renvoyé vers son accueil plutôt que de voir un
 //  formulaire sans objet.
+//
+//  Au moment de la connexion, cette garde se rend avec le nouvel état avant
+//  que la navigation de useLogin n'aboutisse : elle doit donc viser la même
+//  destination, sinon sa redirection écrase la page demandée.
 // ─────────────────────────────────────────────
 export const GuestGuard = () => {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
+  const location = useLocation();
 
   if (status === "pending") return <RouteFallback />;
-  if (status === "authenticated") return <Navigate to="/" replace />;
+  if (status === "authenticated" && user) {
+    return <Navigate to={afterLoginPath(location.state, user)} replace />;
+  }
 
   return <Outlet />;
 };

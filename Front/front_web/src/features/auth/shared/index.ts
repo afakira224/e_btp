@@ -5,6 +5,7 @@ export { GuestGuard } from "./components/GuestGuard";
 export { AuthLayout } from "./components/AuthLayout";
 export { MockCredentials, MockLink } from "./components/MockNotice";
 export { PasswordChecklist } from "./components/PasswordChecklist";
+export { afterLoginPath, homeOf } from "./utils/redirect";
 export {
   checkPassword,
   emailSchema,

@@ -4,6 +4,7 @@ import { Alert, Button, Input } from "../../../../shared/ui";
 import { useForm } from "../../../../shared/hooks/useForm";
 import { useDocumentTitle } from "../../../../shared/hooks/useDocumentTitle";
 import { resendVerificationRequest, useAuth } from "../../../auth";
+import { ShopRequestPanel } from "../../../shop-request";
 import {
   AccountHeader,
   AccountPage,
@@ -203,6 +204,9 @@ export const ProfilePage = () => {
             </div>
           ) : null}
         </AccountPanel>
+
+        {/* Ouvrir une boutique part d'ici : demande, suivi, accès à l'espace vendeur. */}
+        <ShopRequestPanel />
       </div>
     </AccountPage>
   );

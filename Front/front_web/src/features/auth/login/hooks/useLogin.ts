@@ -1,13 +1,9 @@
 import { useCallback, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../../../../shared/api";
-import { useAuth } from "../../shared";
+import { afterLoginPath, useAuth } from "../../shared";
 import { loginRequest } from "../api/login.api";
 import type { LoginValues } from "../validation/login.schema";
-
-interface Location {
-  from?: { pathname?: string };
-}
 
 export const useLogin = () => {
   const { setUser } = useAuth();
@@ -25,9 +21,9 @@ export const useLogin = () => {
         const { user } = await loginRequest(values);
         setUser(user);
 
-        // Retour à la page demandée avant la redirection vers /login.
-        const target = (location.state as Location | null)?.from?.pathname ?? "/";
-        navigate(target, { replace: true });
+        // Retour à la page demandée avant la redirection vers /login,
+        // sinon l'accueil du compte (boutique, administration, site).
+        navigate(afterLoginPath(location.state, user), { replace: true });
       } catch (caught) {
         if (caught instanceof ApiError) {
           // 403 = email non vérifié : ce n'est pas un mauvais mot de passe,

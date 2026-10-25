@@ -22,6 +22,8 @@ import { CartPage, CheckoutPage } from "../../features/cart";
 import { SearchResultsPage } from "../../features/search";
 import { ShopPage, ShopsPage } from "../../features/shops";
 import { WishlistPage } from "../../features/wishlist";
+import { ShopRequestFormPage, ShopRequestStatusPage } from "../../features/shop-request";
+import { AdminGuard, ShopRequestReviewPage, ShopRequestsPage } from "../../features/admin";
 import { HomePage } from "../../features/home";
 import {
   AccountOverviewPage,
@@ -39,6 +41,7 @@ import {
   SellerHomePage,
   SellerShopLayout,
   ShopDeliveryPage,
+  ShopInfoPage,
 } from "../../features/seller";
 import { SiteLayout } from "../../shared/layout";
 import { ROUTES } from "./routes";
@@ -95,6 +98,8 @@ export const AppRouter = () => (
           <Route path={ROUTES.accountAddressEdit} element={<AddressFormPage />} />
           <Route path={ROUTES.accountProfile} element={<ProfilePage />} />
           <Route path={ROUTES.accountSettings} element={<SettingsPage />} />
+          <Route path={ROUTES.accountShopRequest} element={<ShopRequestStatusPage />} />
+          <Route path={ROUTES.accountShopRequestNew} element={<ShopRequestFormPage />} />
 
           {/* Espace vendeur : comptes boutique et administration seulement.
               Une boutique = une ossature (en-tête, onglets) et ses rubriques. */}
@@ -106,7 +111,16 @@ export const AppRouter = () => (
               <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
               <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
               <Route path={ROUTES.sellerDelivery} element={<ShopDeliveryPage />} />
+              <Route path={ROUTES.sellerInfo} element={<ShopInfoPage />} />
             </Route>
+          </Route>
+
+          {/* Administration : comptes admin seulement. L'accueil de l'espace
+              est la file des demandes de boutique à examiner. */}
+          <Route element={<AdminGuard />}>
+            <Route path={ROUTES.admin} element={<Navigate to={ROUTES.adminShopRequests} replace />} />
+            <Route path={ROUTES.adminShopRequests} element={<ShopRequestsPage />} />
+            <Route path={ROUTES.adminShopRequest} element={<ShopRequestReviewPage />} />
           </Route>
         </Route>
       </Route>

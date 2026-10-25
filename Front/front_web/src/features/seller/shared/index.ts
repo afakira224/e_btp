@@ -8,8 +8,10 @@ export {
   saveShopDelivery,
   searchCatalogProducts,
   updateOffer,
+  updateShopInfo,
   type OfferPage,
   type OfferSubmission,
+  type ShopInfoSubmission,
 } from "./api/seller.api";
 export { DeliveryModesEditor } from "./components/DeliveryModesEditor";
 export { DeliverySummary } from "./components/DeliverySummary";

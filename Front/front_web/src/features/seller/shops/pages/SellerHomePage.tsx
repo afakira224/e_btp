@@ -27,7 +27,7 @@ export const SellerHomePage = () => {
   const header = (
     <SellerHeader
       title="Ma boutique"
-      lede="Gérez les produits de vos boutiques et les modes de livraison que vous proposez."
+      lede="Gérez les produits, les modes de livraison et les informations de vos boutiques."
     />
   );
 
@@ -59,8 +59,9 @@ export const SellerHomePage = () => {
       {header}
       {shops.data.length === 0 ? (
         <Alert tone="info">
-          Aucune boutique n'est rattachée à ce compte. La création d'une boutique passe par
-          l'administration de la plateforme.
+          Aucune boutique n'est rattachée à ce compte.{" "}
+          <Link to="/compte/boutique/demande">Demander l'ouverture d'une boutique</Link> : l'équipe de
+          la plateforme examine chaque demande.
         </Alert>
       ) : (
         <ul className={styles.shops}>

@@ -5,3 +5,4 @@ export { SellerGuard, SellerShopLayout } from "./shared";
 export { SellerHomePage } from "./shops";
 export { ShopDeliveryPage } from "./delivery";
 export { OfferFormPage, OffersPage } from "./products";
+export { ShopInfoPage } from "./settings";

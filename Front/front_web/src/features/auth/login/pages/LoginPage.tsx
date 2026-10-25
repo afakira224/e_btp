@@ -11,6 +11,8 @@ export const LoginPage = () => (
     footer={
       <>
         Pas encore de compte ? <Link to="/signup">Créer un compte</Link>
+        <br />
+        Vous êtes commerçant ? Connectez-vous, puis ouvrez votre boutique depuis votre profil.
       </>
     }
   >

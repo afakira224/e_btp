@@ -7,12 +7,13 @@ import type {
 import type { Product, ProductBoutique } from "../../../../entities/product";
 import type { Shop } from "../../../../entities/shop";
 import { EntityType, type User } from "../../../../entities/user";
-import { fetchShops } from "../../../shops";
+import { fetchShop, fetchShops } from "../../../shops";
 
 // ─────────────────────────────────────────────
 //  Espace vendeur — routes du back utilisées :
 //
 //   GET  /shops?ownerId=                    boutiques du vendeur
+//   PUT  /shops/:id                         multipart : informations + logo
 //   GET  /shops/:id/delivery                réglages et portée
 //   PUT  /shops/:id/delivery                { modes, flatRateFee }
 //   GET  /product-boutiques?boutiqueId=     produits de la boutique
@@ -36,6 +37,36 @@ export const fetchManagedShops = async (user: User, signal?: AbortSignal): Promi
 export const canManageShop = (user: User | null, shop: Pick<Shop, "ownerId">): boolean =>
   user !== null &&
   (user.role === EntityType.ADMIN || (user.role === EntityType.SHOP && shop.ownerId === user._id));
+
+// ── Informations de la boutique ─────────────
+export interface ShopInfoSubmission {
+  nom: string;
+  description: string;
+  email: string;
+  adresse: string;
+  /** Nouveau logo : remplace l'ancien. */
+  logo?: File | null | undefined;
+  /** Retire le logo sans le remplacer. */
+  removeLogo?: boolean | undefined;
+}
+
+/**
+ * Multipart : le logo l'impose. Le téléphone de la boutique n'est ni lu ni
+ * envoyé (voir entities/shop). PUT /shops/:id renvoie le document brut : on
+ * relit la boutique par fetchShop, qui la normalise comme partout ailleurs.
+ */
+export const updateShopInfo = async (shopId: string, submission: ShopInfoSubmission): Promise<Shop> => {
+  const form = new FormData();
+  form.append("nom", submission.nom);
+  form.append("description", submission.description);
+  form.append("email", submission.email);
+  form.append("adresse", submission.adresse);
+  if (submission.logo) form.append("logo", submission.logo);
+  else if (submission.removeLogo) form.append("removeLogo", "true");
+
+  await apiClient.put(`/shops/${encodeURIComponent(shopId)}`, form);
+  return fetchShop(shopId);
+};
 
 // ── Livraison de la boutique ────────────────
 const deliveryPath = (shopId: string) => `/shops/${encodeURIComponent(shopId)}/delivery`;

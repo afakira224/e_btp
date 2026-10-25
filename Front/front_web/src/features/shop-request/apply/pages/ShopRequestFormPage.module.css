@@ -1,0 +1,112 @@
+/* Partition 62/38 : le formulaire a la priorité, la marche à suivre l'accompagne. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.main {
+  min-width: 0;
+  max-width: 720px;
+}
+
+.notice {
+  margin-bottom: var(--space-5);
+}
+
+.notice p + p {
+  margin-top: var(--space-2);
+}
+
+.aside {
+  position: sticky;
+  top: calc(var(--header-height, 72px) + var(--space-5));
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.asideTitle {
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.stepIndex {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.stepTitle {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.stepText {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.asideNote {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.skeleton {
+  height: 480px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* L'encart passe au-dessus du formulaire : on lit la marche à suivre d'abord. */
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+  }
+
+  .aside {
+    position: static;
+    order: -1;
+  }
+}

@@ -61,20 +61,43 @@ export const AccountOverviewPage = () => {
   };
 
   // Les comptes boutique (et l'administration) gèrent aussi des boutiques :
-  // leur espace vendeur passe en tête.
-  const seller =
-    user.role === EntityType.SHOP || user.role === EntityType.ADMIN
+  // leur espace vendeur passe en tête. L'administration examine en plus les
+  // demandes d'ouverture ; un client, lui, est invité à en déposer une.
+  const isSeller = user.role === EntityType.SHOP || user.role === EntityType.ADMIN;
+  const admin =
+    user.role === EntityType.ADMIN
       ? [
           {
-            to: "/ma-boutique",
-            title: "Ma boutique",
-            text: "Vos produits et vos modes de livraison : retrait, livraison gratuite, prix fixe.",
-            summary: "Espace vendeur",
+            to: "/admin",
+            title: "Administration",
+            text: "Les demandes d'ouverture de boutique : examiner, approuver, refuser.",
+            summary: "Demandes de boutique",
           },
         ]
       : [];
+  const seller = isSeller
+    ? [
+        {
+          to: "/ma-boutique",
+          title: "Ma boutique",
+          text: "Vos produits, vos modes de livraison et les informations de votre boutique.",
+          summary: "Espace vendeur",
+        },
+      ]
+    : [];
+  const openShop = isSeller
+    ? []
+    : [
+        {
+          to: "/compte/boutique/demande",
+          title: "Ouvrir une boutique",
+          text: "Vendez vos matériaux sur la plateforme : présentez votre activité, l'équipe examine la demande.",
+          summary: "Vendre sur BTP",
+        },
+      ];
 
   const sections = [
+    ...admin,
     ...seller,
     {
       to: "/compte/commandes",
@@ -101,7 +124,7 @@ export const AccountOverviewPage = () => {
     {
       to: "/compte/profil",
       title: "Mon profil",
-      text: "Nom, prénom et téléphone ; statut de votre adresse e-mail.",
+      text: "Nom, prénom et téléphone ; statut de votre adresse e-mail ; votre boutique.",
       summary: user.isEmailVerified ? "E-mail vérifié" : "E-mail à vérifier",
     },
     {
@@ -122,6 +145,7 @@ export const AccountOverviewPage = () => {
       text: "Les articles prêts à être commandés.",
       summary: plural(cartCount, "article"),
     },
+    ...openShop,
   ];
 
   return (

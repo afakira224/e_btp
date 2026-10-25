@@ -11,6 +11,9 @@ export const ROUTES = {
   accountAddressEdit: "/compte/adresses/:addressId/modifier",
   accountProfile: "/compte/profil",
   accountSettings: "/compte/parametres",
+  // Ouverture d'une boutique : questionnaire, puis suivi de la demande.
+  accountShopRequest: "/compte/boutique",
+  accountShopRequestNew: "/compte/boutique/demande",
   // Espace vendeur : une boutique, ses produits et ses modes de livraison.
   seller: "/ma-boutique",
   sellerShop: "/ma-boutique/:boutiqueId",
@@ -18,6 +21,11 @@ export const ROUTES = {
   sellerProductNew: "/ma-boutique/:boutiqueId/produits/nouveau",
   sellerProductEdit: "/ma-boutique/:boutiqueId/produits/:offreId/modifier",
   sellerDelivery: "/ma-boutique/:boutiqueId/livraison",
+  sellerInfo: "/ma-boutique/:boutiqueId/informations",
+  // Administration : examen des demandes d'ouverture de boutique.
+  admin: "/admin",
+  adminShopRequests: "/admin/demandes-boutique",
+  adminShopRequest: "/admin/demandes-boutique/:requestId",
   panier: "/panier",
   // Tunnel de commande : livraison par boutique, adresse, confirmation.
   commande: "/commande",

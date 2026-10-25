@@ -5,7 +5,7 @@ import { DomainMenu } from "../../features/catalog";
 import { useCart } from "../../features/cart";
 import { useWishlist } from "../../features/wishlist";
 import { SearchBar } from "../../features/search";
-import { getInitials } from "../../entities/user";
+import { EntityType, getInitials, type User } from "../../entities/user";
 import styles from "./SiteHeader.module.css";
 
 const ANNOUNCEMENTS = [
@@ -22,6 +22,18 @@ const NAV = [
   { to: "/promotions", label: "Promotions" },
   { to: "/boutiques", label: "Boutiques" },
 ];
+
+/**
+ * Entrée « vendeur » de la navigation, selon le compte : un gérant retrouve
+ * sa boutique, l'administration ses demandes à examiner ; tous les autres,
+ * visiteurs compris, sont invités à ouvrir une boutique. Un visiteur passe
+ * par la connexion, qui le ramène au questionnaire.
+ */
+const sellerEntry = (user: User | null) => {
+  if (user?.role === EntityType.SHOP) return { to: "/ma-boutique", label: "Ma boutique" };
+  if (user?.role === EntityType.ADMIN) return { to: "/admin", label: "Administration" };
+  return { to: "/compte/boutique/demande", label: "Vendre sur BTP" };
+};
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   [styles.link, isActive ? styles.active : ""].filter(Boolean).join(" ");
@@ -42,6 +54,7 @@ export const SiteHeader = () => {
   const { user, isAuthenticated } = useAuth();
   const { count: cartCount } = useCart();
   const { count: wishCount } = useWishlist();
+  const seller = sellerEntry(isAuthenticated ? user : null);
 
   return (
     <header className={styles.header}>
@@ -115,6 +128,13 @@ export const SiteHeader = () => {
                 {entry.label}
               </NavLink>
             ))}
+
+            <NavLink
+              to={seller.to}
+              className={(state) => [linkClass(state), styles.seller].join(" ")}
+            >
+              {seller.label}
+            </NavLink>
           </nav>
         </div>
       </div>

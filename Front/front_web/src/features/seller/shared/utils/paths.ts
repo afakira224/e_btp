@@ -8,4 +8,7 @@ export const sellerPaths = {
   editProduct: (shopId: string, offerId: string) =>
     `${shop(shopId)}/produits/${encodeURIComponent(offerId)}/modifier`,
   delivery: (shopId: string) => `${shop(shopId)}/livraison`,
+  info: (shopId: string) => `${shop(shopId)}/informations`,
+  /** Vitrine publique de la boutique, telle que les clients la voient. */
+  storefront: (shopId: string) => `/boutiques/${encodeURIComponent(shopId)}`,
 } as const;

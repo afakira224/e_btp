@@ -2,5 +2,5 @@
 export { ShopsPage } from "./directory";
 export { ShopPage } from "./profile";
 
-// Lectures des boutiques, réutilisées par l'espace vendeur.
-export { fetchShop, fetchShops } from "./shared";
+// Lectures des boutiques et monogramme, réutilisés par l'espace vendeur.
+export { fetchShop, fetchShops, ShopAvatar } from "./shared";

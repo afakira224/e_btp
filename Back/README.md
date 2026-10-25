@@ -127,7 +127,42 @@ Règles appliquées :
 - **Utilisateur authentifié** : panier, favoris, commandes, adresses — uniquement les siens.
 - **Admin / boutique** : création et modification du catalogue, changement de statut des commandes.
 - **Boutique** : uniquement ses propres boutiques et leurs produits (`canManageShop`, `shared/helpers/shopAccess.ts`) — réglages, livraison, offres. `requireRole` ne vérifie que le type de compte.
-- **Admin seul** : promotions, suppressions.
+- **Admin seul** : promotions, suppressions, examen des demandes d'ouverture de boutique.
+
+## Demandes d'ouverture de boutique
+
+Un client connecté demande l'ouverture d'une boutique en répondant à un
+questionnaire ; l'administration l'approuve ou la refuse. Modèle :
+`models/shopRequest.model.ts`, règles : `shared/forms/shopRequest.form.ts`.
+
+| Route | Accès | Effet |
+| --- | --- | --- |
+| `POST /shop-requests` | `user`, `user_societe`, `shop` | Dépose une demande ; le demandeur est la session, jamais le corps |
+| `GET /shop-requests/mine` | Authentifié | Ses demandes, la plus récente d'abord |
+| `PATCH /shop-requests/:id/cancel` | Demandeur | Retire une demande en attente |
+| `GET /shop-requests?status=&search=&page=&limit=` | Admin | `{ requests, total, page, totalPages, counts }` — en attente : les plus anciennes d'abord |
+| `GET /shop-requests/:id` | Admin ou demandeur | Détail, avec le demandeur et les domaines |
+| `PATCH /shop-requests/:id/approve` | Admin | Ouvre la boutique |
+| `PATCH /shop-requests/:id/reject` `{ reason }` | Admin | Refus motivé (10 à 500 caractères) |
+
+Le questionnaire : `nom`, `description` (20 à 1000 caractères), `familleIds`
+(au moins un domaine actif), `sellerType` (`particulier` | `entreprise`),
+`rccm` (exigé d'une entreprise seulement), `experience`, `catalogSize`,
+`hasPhysicalStore`, `adresse`, `email` et `message` facultatifs, `acceptTerms`
+obligatoire.
+
+- **Une seule demande en attente par compte** : 409 côté contrôleur, et un
+  index unique partiel (`status: "pending"`) tranche entre deux envois simultanés.
+- **Nom unique** : une boutique existante du même nom (casse ignorée) refuse le
+  dépôt comme l'approbation (409).
+- **L'approbation**, dans une transaction : création de la boutique (`nom`,
+  `description`, `adresse`, `email` de la demande ou du compte ; livraison par
+  défaut), passage du compte au type `shop` dans `User` et `EntitiesLogin`,
+  clôture de la demande (`reviewedBy`, `reviewedAt`, `shopId`). Ensuite,
+  `updateUserSessionsRole` reporte le nouveau type dans les sessions ouvertes du
+  demandeur : sans cela, `requireRole` lui refuserait l'espace vendeur jusqu'à
+  sa prochaine connexion. Un compte admin garde son rôle.
+- Un email part au dépôt, à l'approbation et au refus (motif compris, échappé).
 
 ## Livraison
 

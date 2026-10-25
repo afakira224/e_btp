@@ -33,6 +33,9 @@ export const SignupPage = () => {
       footer={
         <>
           Vous avez déjà un compte ? <Link to="/login">Se connecter</Link>
+          <br />
+          Vous êtes commerçant ? Créez d'abord votre compte : vous demanderez l'ouverture de votre
+          boutique depuis votre profil.
         </>
       }
     >

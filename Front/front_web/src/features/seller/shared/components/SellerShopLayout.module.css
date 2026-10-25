@@ -47,3 +47,16 @@
     animation: none;
   }
 }
+
+.storefront {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.storefront:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

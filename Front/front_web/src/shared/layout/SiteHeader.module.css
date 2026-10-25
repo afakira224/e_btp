@@ -69,6 +69,13 @@
   height: 44px;
 }
 
+/* L'entrée vendeur se tient à l'écart des rayons du catalogue. */
+.seller {
+  margin-left: auto;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .link {
   position: relative;
   display: inline-flex;

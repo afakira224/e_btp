@@ -7,5 +7,6 @@ export { AddressesPage, AddressFormPage, type AddressFormState } from "./address
 export { ProfilePage } from "./profile";
 export { SettingsPage } from "./settings";
 
-// Cadre et blocs de page, repris par l'espace vendeur pour rester homogène.
-export { AccountPage, AccountPanel } from "./shared";
+// Cadre et blocs de page, repris par l'espace vendeur, le parcours
+// d'ouverture de boutique et l'administration pour rester homogènes.
+export { AccountHeader, AccountPage, AccountPanel, ConfirmAction, formatDate } from "./shared";

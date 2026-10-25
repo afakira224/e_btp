@@ -61,6 +61,10 @@ Le mock ne route que ce que le back monte, avec les mêmes paramètres :
 | `POST /product-boutiques` · `PUT /product-boutiques/:id` | Création et modification d'une offre (multipart) |
 | `POST /cart/:userId/delivery-quote` | Modes et frais de livraison du panier |
 | `POST /orders/:userId` | Checkout : un mode par boutique, adresse du carnet |
+| `PUT /shops/:id` | Informations de la boutique et logo (multipart, espace vendeur) |
+| `POST /shop-requests` · `GET /shop-requests/mine` · `PATCH /shop-requests/:id/cancel` | Demande d'ouverture de boutique, suivi, retrait |
+| `GET /shop-requests?status=&search=&page=&limit=` · `GET /shop-requests/:id` | File d'examen de l'administration |
+| `PATCH /shop-requests/:id/approve` · `PATCH /shop-requests/:id/reject` | Ouverture de la boutique, ou refus motivé |
 
 Tris acceptés par `/search` : `newest`, `price_asc`, `price_desc`, `rating`,
 `popular`.
@@ -115,6 +119,16 @@ boutique Volta Électrique et ouvre l'espace « Ma boutique ». Avec le vrai bac
 `npm run seed` crée un gérant par boutique sur le même modèle
 (`gerant.<boutique>@btp.com`).
 
+Deux comptes servent le parcours d'ouverture de boutique (même mot de passe) :
+
+| Compte | Rôle |
+| --- | --- |
+| `admin@btp.com` | Administration : examine les demandes, arrive sur `/admin` à la connexion |
+| `ibrahima@btp.com` | Client dont la demande « Quincaillerie Kipé » attend l'examen |
+
+Le compte `mamadou@btp.com` n'a déposé aucune demande : c'est lui qui permet
+de suivre le parcours depuis le début.
+
 En mode simulé, le catalogue de départ est figé dans `catalogSeed.ts` ; ce
 qu'en font les vendeurs (réglages de livraison, prix, stock, offres ajoutées)
 est rangé dans la base simulée et appliqué à la lecture par `liveCatalog.ts`.
@@ -144,8 +158,17 @@ Une fois branché sur l'API réelle, l'origine du front doit figurer dans
 
 L'inscription publique ne crée que des comptes **`user`**. Le formulaire ne
 propose aucun choix de rôle et `useSignup` impose `EntityType.USER` : un rôle
-choisi par le client serait un rôle que n'importe qui peut réclamer. Les
-comptes boutique, société et administrateur passent par une voie interne.
+choisi par le client serait un rôle que n'importe qui peut réclamer. Un compte
+devient **`shop`** quand l'administration approuve sa demande d'ouverture de
+boutique (voir plus bas) ; les comptes société et administrateur passent par
+une voie interne.
+
+À la connexion, chacun arrive là où il travaille quand aucune page n'était
+demandée : le gérant dans « Ma boutique », l'administration devant les
+demandes à examiner, le client sur l'accueil. `useLogin` et `GuestGuard`
+calculent cette destination avec la même fonction (`afterLoginPath`) : à la
+connexion, les deux naviguent dans le même rendu, et une garde qui renvoyait
+toujours vers `/` écrasait la page demandée.
 
 ### Écrans
 
@@ -166,11 +189,16 @@ comptes boutique, société et administrateur passent par une voie interne.
 | `/commande` | Tunnel de commande : livraison par boutique, adresse, confirmation | Authentifié |
 | `/favoris` | Favoris | Authentifié |
 | `/compte` | Espace compte | Authentifié |
+| `/compte/boutique/demande` | Questionnaire d'ouverture de boutique | Authentifié |
+| `/compte/boutique` | Suivi de la demande : issue, réponses, historique | Authentifié |
 | `/ma-boutique` | Espace vendeur : choix de la boutique (entrée directe s'il n'y en a qu'une) | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits` | Produits de la boutique et provenance de leur livraison | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits/nouveau` | Mise en vente d'un produit du catalogue | Boutique, admin |
 | `/ma-boutique/:boutiqueId/produits/:offreId/modifier` | Modification d'un produit | Boutique, admin |
 | `/ma-boutique/:boutiqueId/livraison` | Modes de livraison par défaut de la boutique | Boutique, admin |
+| `/ma-boutique/:boutiqueId/informations` | Nom, présentation, email, adresse et logo de la boutique | Boutique, admin |
+| `/admin/demandes-boutique` | File des demandes d'ouverture, par statut | Admin |
+| `/admin/demandes-boutique/:requestId` | Examen d'une demande : approuver ou refuser | Admin |
 
 L'accueil est délibérément public : une vitrine derrière un mur
 d'authentification empêche de découvrir le catalogue avant de s'inscrire.
@@ -385,6 +413,41 @@ panier, vidé par le serveur, est relu.
 Les coupons ne sont pas proposés dans le tunnel : le back les accepte (`code`),
 le mode simulé ne les porte pas.
 
+## Ouverture d'une boutique
+
+Un client connecté demande l'ouverture d'une boutique ; l'administration
+l'approuve ou la refuse.
+
+1. **Profil → « Ma boutique » → « Créer une boutique »** (aussi depuis « Vendre
+   sur BTP » dans l'en-tête et la carte « Ouvrir une boutique » de « Mon
+   compte »). Un visiteur passe par la connexion, qui le ramène au questionnaire.
+2. **Le questionnaire**, en quatre parties : la boutique (nom, présentation,
+   domaines du catalogue), l'activité (particulier ou entreprise, numéro RCCM
+   exigé d'une entreprise seulement, ancienneté, taille du catalogue prévu), le
+   retrait (point de vente, adresse, email de contact facultatif) et un message
+   libre. L'acceptation des conditions de vente est obligatoire. Les règles et
+   messages reprennent ceux de `createShopRequestForm` côté back.
+3. **Le suivi** (`/compte/boutique`) : statut, réponses déposées, historique. Une
+   demande en attente peut être retirée ; une seule demande en attente par
+   compte, le formulaire renvoie vers le suivi s'il y en a déjà une.
+4. **L'examen** (`/admin/demandes-boutique`) : file des demandes à examiner, les
+   plus anciennes d'abord, onglets par statut avec leur nombre, recherche par
+   nom. La page d'une demande montre les réponses et le contact du demandeur.
+   Approuver et refuser se confirment sur place ; un refus exige un motif
+   (10 à 500 caractères), envoyé au demandeur.
+5. **L'approbation** crée la boutique avec les réponses (nom, présentation,
+   adresse, email ou, à défaut, celui du compte) et fait passer le compte au
+   type `shop`. Le back met aussi à jour les sessions ouvertes : le nouveau
+   gérant n'a pas à se reconnecter. Côté front, `useMyShopRequests` relit le
+   profil dès qu'il voit une demande approuvée, pour que l'espace vendeur
+   s'ouvre sans rechargement.
+6. **Un refus** reste visible dans le profil avec son motif ; « Faire une
+   nouvelle demande » reprend les réponses précédentes comme brouillon.
+
+Le téléphone de la boutique n'est ni demandé ni modifiable (voir
+`entities/shop`) : l'administration recontacte le demandeur par le téléphone
+de son compte.
+
 ## Espace vendeur « Ma boutique »
 
 Réservé aux comptes `shop` et `admin` (`SellerGuard`), sous `AuthGuard`. On y
@@ -392,6 +455,11 @@ entre depuis « Mon compte ». Le back reste seul juge : il refuse toute écritu
 sur la boutique d'un autre (`canManageShop`) ; le front se contente de ne pas
 proposer de formulaire inutile.
 
+- **Informations** : nom, présentation, email de contact, adresse et logo,
+  envoyés en multipart à `PUT /shops/:id`. L'adresse ne peut pas être retirée
+  tant que le retrait en boutique est proposé (refus du serveur, message
+  affiché). L'en-tête de l'espace suit l'enregistrement sans rechargement, et
+  « Voir ma vitrine » mène à la page publique de la boutique.
 - **Livraison** : les trois modes — retrait en boutique, livraison gratuite,
   prix fixe — activables séparément ; le tarif n'apparaît qu'avec le prix fixe.
   À droite, la configuration appliquée et sa portée : combien de produits la
@@ -485,7 +553,15 @@ src/
 │   │   ├── shared/         API, garde, ossature, éditeur des modes, règles
 │   │   ├── shops/          Choix de la boutique
 │   │   ├── delivery/       Livraison par défaut de la boutique
-│   │   └── products/       Liste, création et modification d'un produit
+│   │   ├── products/       Liste, création et modification d'un produit
+│   │   └── settings/       Informations et logo de la boutique
+│   ├── shop-request/       Ouverture d'une boutique
+│   │   ├── shared/         API, statut, résumé des réponses, paths
+│   │   ├── apply/          Questionnaire et sa validation
+│   │   └── status/         Suivi de la demande, panneau du profil
+│   ├── admin/              Administration
+│   │   ├── shared/         API, garde, en-tête, paths
+│   │   └── shop-requests/  File et examen des demandes de boutique
 │   └── home/
 │       ├── shared/         Section (en-tête, chargement, erreur)
 │       ├── hero/           Carrousel : model · hooks · components

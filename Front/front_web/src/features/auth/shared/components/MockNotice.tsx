@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { DEMO_EMAIL, DEMO_PASSWORD, SELLER_EMAIL } from "../../../../shared/api";
+import { ADMIN_EMAIL, DEMO_EMAIL, DEMO_PASSWORD, SELLER_EMAIL } from "../../../../shared/api";
 import { env } from "../../../../shared/config/env";
 import styles from "./MockNotice.module.css";
 
@@ -26,6 +26,10 @@ export const MockCredentials = () => {
         <span className={styles.row}>
           <span className={styles.key}>Vendeur</span>
           {SELLER_EMAIL}
+        </span>
+        <span className={styles.row}>
+          <span className={styles.key}>Admin</span>
+          {ADMIN_EMAIL}
         </span>
       </div>
     </div>

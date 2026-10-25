@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { NavLink, Outlet, useParams } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { Link, NavLink, Outlet, useParams } from "react-router-dom";
 import type { Shop } from "../../../../entities/shop";
 import { Alert } from "../../../../shared/ui";
 import { AccountPage } from "../../../account";
@@ -17,8 +17,8 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
 
 // ─────────────────────────────────────────────
 //  Ossature d'une boutique — /ma-boutique/:boutiqueId/…
-//  Charge la boutique une fois pour ses rubriques (produits, livraison) et
-//  la leur passe par le contexte de l'Outlet.
+//  Charge la boutique une fois pour ses rubriques (produits, livraison,
+//  informations) et la leur passe par le contexte de l'Outlet.
 // ─────────────────────────────────────────────
 export const SellerShopLayout = () => {
   const { boutiqueId = "" } = useParams<{ boutiqueId: string }>();
@@ -26,6 +26,9 @@ export const SellerShopLayout = () => {
 
   const load = useCallback((signal: AbortSignal) => fetchShop(boutiqueId, signal), [boutiqueId]);
   const shop = useResource<Shop | null>(load, null, boutiqueId);
+  // Après une modification des informations, la version enregistrée fait
+  // foi : l'en-tête suit sans relecture, et la rubrique reste montée.
+  const [updated, setUpdated] = useState<Shop | null>(null);
 
   if (shop.error) {
     return (
@@ -45,7 +48,7 @@ export const SellerShopLayout = () => {
     );
   }
 
-  const data = shop.data;
+  const data = updated?.id === shop.data.id ? updated : shop.data;
 
   // Le back refuserait toute écriture : autant ne pas proposer de formulaire.
   if (!canManageShop(user, data)) {
@@ -60,7 +63,7 @@ export const SellerShopLayout = () => {
     );
   }
 
-  const context: SellerShopContext = { shop: data };
+  const context: SellerShopContext = { shop: data, onShopUpdated: setUpdated };
 
   return (
     <AccountPage>
@@ -68,6 +71,11 @@ export const SellerShopLayout = () => {
         title={data.nom}
         lede={data.adresse ? data.adresse : "Adresse de la boutique non renseignée"}
         trail={[{ label: data.nom }]}
+        action={
+          <Link className={styles.storefront} to={sellerPaths.storefront(data.id)}>
+            Voir ma vitrine →
+          </Link>
+        }
       />
 
       <nav className={styles.tabs} aria-label="Rubriques de la boutique">
@@ -76,6 +84,9 @@ export const SellerShopLayout = () => {
         </NavLink>
         <NavLink className={tabClass} to={sellerPaths.delivery(data.id)}>
           Livraison
+        </NavLink>
+        <NavLink className={tabClass} to={sellerPaths.info(data.id)}>
+          Informations
         </NavLink>
       </nav>
 
