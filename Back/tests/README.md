@@ -58,7 +58,7 @@ tests/
 | Règles métier pures | `computePromotionDiscount`, `isPromotionActive` |
 | Validation | formulaires panier, commande, avis, favoris, adresse, promotion |
 | Fichiers | `fileUpload` (URL publique, suppression, limites de taille) |
-| Contrôleurs | les 13 : auth, panier, commande, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, famille, catégorie, sous-catégorie |
+| Contrôleurs | auth, panier, commande, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, demande de boutique, famille, catégorie, sous-catégorie |
 
 ## Écrire un nouveau test de contrôleur
 
