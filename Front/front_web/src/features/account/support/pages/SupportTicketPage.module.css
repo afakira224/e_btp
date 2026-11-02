@@ -1,0 +1,9 @@
+.alert {
+  margin-bottom: var(--space-5);
+}
+
+.skeleton {
+  height: 360px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}

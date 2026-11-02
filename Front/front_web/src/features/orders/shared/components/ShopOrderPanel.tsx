@@ -36,6 +36,8 @@ interface ShopOrderPanelProps {
   onUpdated: (part: ShopOrder, message: string) => void;
   /** Historique ouvert d'emblée (page de détail) ou replié (liste). */
   historyOpen?: boolean;
+  /** Lien ajouté sous les actions (« Signaler un problème »). */
+  footer?: ReactNode;
 }
 
 // ─────────────────────────────────────────────
@@ -44,7 +46,7 @@ interface ShopOrderPanelProps {
 //  boutique et l'administration ; le serveur a déjà retiré ce que ce
 //  lecteur ne doit pas voir (code de remise, coordonnées du client).
 // ─────────────────────────────────────────────
-export const ShopOrderPanel = ({ part, viewer, title, onUpdated, historyOpen = false }: ShopOrderPanelProps) => {
+export const ShopOrderPanel = ({ part, viewer, title, onUpdated, historyOpen = false, footer }: ShopOrderPanelProps) => {
   const guidance = guidanceFor(part, viewer);
   const refund = refundNoteFor(part, viewer);
   const pickup = isPickupDelivery(part.delivery);
@@ -136,6 +138,8 @@ export const ShopOrderPanel = ({ part, viewer, title, onUpdated, historyOpen = f
       </dl>
 
       <ShopOrderActions part={part} onUpdated={onUpdated} />
+
+      {footer ? <div className={styles.footer}>{footer}</div> : null}
 
       <details className={styles.history} open={historyOpen}>
         <summary>Historique ({part.statusHistory.length})</summary>

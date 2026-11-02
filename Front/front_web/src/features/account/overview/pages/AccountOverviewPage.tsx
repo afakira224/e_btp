@@ -70,8 +70,8 @@ export const AccountOverviewPage = () => {
           {
             to: "/admin",
             title: "Administration",
-            text: "Les demandes d'ouverture de boutique : examiner, approuver, refuser.",
-            summary: "Demandes de boutique",
+            text: "Demandes de boutique, commandes et litiges, support et signalements.",
+            summary: "Espace d'administration",
           },
         ]
       : [];
@@ -108,6 +108,12 @@ export const AccountOverviewPage = () => {
         : data
           ? `${data.inProgress} en cours · ${data.totalOrders} au total`
           : "—",
+    },
+    {
+      to: "/compte/support",
+      title: "Support",
+      text: "Un problème de commande, un signalement, une question : vos demandes et leurs réponses.",
+      summary: "Demandes et signalements",
     },
     {
       to: "/compte/adresses",

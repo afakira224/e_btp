@@ -29,9 +29,10 @@ import {
 import * as account from "./account";
 import * as orders from "./orders";
 import * as shopOrders from "./shopOrders";
+import * as support from "./support";
 import * as seller from "./seller";
 import * as shopRequests from "./shopRequests";
-import { allShops, findLiveOffer, liveCatalog, rawShop } from "./liveCatalog";
+import { allShops, findLiveOffer, liveCatalog, publicCatalog, rawShop, viewerManages } from "./liveCatalog";
 import {
   objectId,
   randomToken,
@@ -149,6 +150,11 @@ const login = (body: { email: string; password: string }): ApiResponse<{ user: U
   // Message identique dans les deux cas : on ne révèle pas si l'email existe.
   if (!entity || !user || entity.password !== body.password) {
     throw new ApiError("Identifiants invalides.", 401);
+  }
+
+  // Bloqué par la modération : 423, comme le back (403 reste l'email non vérifié).
+  if (db.moderation.blockedUsers[user._id]) {
+    throw new ApiError("Ce compte est bloqué. Contactez le support si vous pensez à une erreur.", 423);
   }
 
   if (!user.isEmailVerified) {
@@ -344,7 +350,9 @@ const listProductBoutiques = (
     throw new ApiError("Boutique introuvable", 404);
   }
 
-  const tous = liveCatalog().filter((item) => {
+  // Son gérant voit aussi les offres masquées par la modération ; le public, jamais.
+  const source = boutiqueId && viewerManages(boutiqueId) ? liveCatalog() : publicCatalog();
+  const tous = source.filter((item) => {
     if (boutiqueId && item.boutique?.id !== boutiqueId) return false;
     if (productId && item.productId !== productId) return false;
     if (isFeatured !== null && item.isFeatured !== (isFeatured === "true")) return false;
@@ -370,7 +378,7 @@ const searchProductBoutiques = (
 
   // Même découpage que le back : le prix est filtré à part, pour que la
   // facette `priceRange` décrive la sélection *sans* la contrainte de prix.
-  const horsPrix = liveCatalog().filter((item) => {
+  const horsPrix = publicCatalog().filter((item) => {
     if (boutiqueId && item.boutique?.id !== boutiqueId) return false;
     // La taxonomie est imbriquée dans le DTO : on lit les objets, pas des
     // identifiants nus.
@@ -427,7 +435,7 @@ const suggestionsFor = (
   id: string,
   params: URLSearchParams
 ): ApiResponse<ProductBoutique[]> => {
-  const catalog = liveCatalog();
+  const catalog = publicCatalog();
   const item = catalog.find((candidate) => candidate.id === id);
   if (!item) throw new ApiError("Produit en boutique non trouvé", 404);
 
@@ -509,7 +517,7 @@ const listRecentlyViewed = (userId: string): ApiResponse<ViewedItem[]> => {
   const ordered = historique.items
     .map((entry) => {
       const dto = findLiveOffer(entry.productBoutiqueId);
-      return dto ? { ...dto, viewedAt: entry.viewedAt } : null;
+      return dto && !dto.hidden ? { ...dto, viewedAt: entry.viewedAt } : null;
     })
     .filter((entry): entry is ViewedItem => entry !== null);
 
@@ -518,7 +526,8 @@ const listRecentlyViewed = (userId: string): ApiResponse<ViewedItem[]> => {
 
 const getOffer = (id: string): ApiResponse<ProductBoutique> => {
   const offre = findLiveOffer(id);
-  if (!offre) throw new ApiError("Produit introuvable.", 404);
+  // Une offre masquée n'existe plus pour le public ; sa boutique la lit encore.
+  if (!offre || (offre.hidden && !viewerManages(offre.boutique?.id))) throw new ApiError("Produit introuvable.", 404);
 
   // Comme `getProductBoutiqueById` cote back : consulter une fiche alimente
   // l'historique, mais seulement pour un utilisateur identifie.
@@ -614,6 +623,18 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
       return orders.listOrders(params);
     case "GET /shop-orders":
       return shopOrders.listShopOrders(params);
+    case "POST /support/tickets":
+      return support.createTicket(body);
+    case "POST /support/contact":
+      return support.contact(body as Record<string, unknown>);
+    case "GET /support/tickets":
+      return support.listTickets(params);
+    case "POST /sanctions":
+      return support.createSanction(body as Record<string, unknown>);
+    case "GET /sanctions":
+      return support.listSanctions(params);
+    case "GET /sanctions/mine":
+      return support.mySanctions();
     case "GET /products":
       return seller.listProducts(params);
     case "POST /product-boutiques":
@@ -703,6 +724,28 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
 
   const sousCommande = /^GET \/shop-orders\/([^/]+)$/.exec(key);
   if (sousCommande?.[1]) return shopOrders.getShopOrder(decodeURIComponent(sousCommande[1]));
+
+  // ── Support et sanctions ───────────────────
+  const demandeMessage = /^POST \/support\/tickets\/([^/]+)\/messages$/.exec(key);
+  if (demandeMessage?.[1]) return support.postMessage(decodeURIComponent(demandeMessage[1]), body);
+
+  const supportAction = /^PATCH \/support\/tickets\/([^/]+)\/([^/]+)$/.exec(key);
+  if (supportAction?.[1] && supportAction[2]) {
+    return support.performAction(
+      decodeURIComponent(supportAction[1]),
+      decodeURIComponent(supportAction[2]),
+      body as Record<string, unknown>
+    );
+  }
+
+  const demandeSupport = /^GET \/support\/tickets\/([^/]+)$/.exec(key);
+  if (demandeSupport?.[1]) return support.getTicket(decodeURIComponent(demandeSupport[1]));
+
+  const mesure = /^PATCH \/sanctions\/([^/]+)\/(lift|request-lift)$/.exec(key);
+  if (mesure?.[1]) {
+    const id = decodeURIComponent(mesure[1]);
+    return mesure[2] === "lift" ? support.liftSanction(id, body as Record<string, unknown>) : support.requestLift(id);
+  }
 
   // Avant `/payments/:orderId`, qui capturerait sinon `sandbox`.
   const paiementSimule = /^POST \/payments\/sandbox\/([^/]+)$/.exec(key);

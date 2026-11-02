@@ -35,7 +35,10 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
   const [state, setState] = useState<"idle" | "sending" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const rupture = isOutOfStock(item);
+  // Suspendue par la modération : la boutique reste visible, mais ne prend
+  // plus de commande d'ici la date dite (le panier refuserait l'article).
+  const suspendedUntil = item.boutique?.suspendedUntil;
+  const rupture = isOutOfStock(item) || !!suspendedUntil;
   const remise = discountPercent(item);
   const economie = item.price - effectivePrice(item);
 
@@ -89,12 +92,23 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
             .join(" ")}
           aria-hidden="true"
         />
-        {rupture
+        {suspendedUntil
+          ? "Boutique suspendue"
+          : rupture
           ? "Rupture de stock"
           : isLowStock(item)
             ? `Plus que ${item.stock} en stock`
             : `${item.stock} en stock`}
       </span>
+
+      {suspendedUntil ? (
+        <div className={styles.feedback}>
+          <Alert tone="warning">
+            Cette boutique ne prend plus de commande jusqu'au{" "}
+            {new Date(suspendedUntil).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}.
+          </Alert>
+        </div>
+      ) : null}
 
       {/* Modes effectifs du produit — ceux de la boutique ou les siens.
           Les frais définitifs sont calculés au panier, par boutique.

@@ -17,6 +17,18 @@
   text-underline-offset: 3px;
 }
 
+.report {
+  margin: 0;
+  padding: 0 var(--space-1);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.report a {
+  color: var(--color-text);
+}
+
 .skeleton {
   height: 420px;
   border-radius: var(--radius-md);

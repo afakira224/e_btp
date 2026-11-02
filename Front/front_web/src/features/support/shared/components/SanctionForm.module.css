@@ -1,0 +1,18 @@
+.form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.target {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.danger {
+  background: var(--color-danger-surface);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}

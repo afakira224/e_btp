@@ -27,6 +27,8 @@ import {
   AdminGuard,
   AdminOrdersPage,
   AdminShopOrderPage,
+  AdminSupportPage,
+  AdminSupportTicketPage,
   ShopRequestReviewPage,
   ShopRequestsPage,
 } from "../../features/admin";
@@ -35,11 +37,15 @@ import {
   AccountOverviewPage,
   AddressesPage,
   AddressFormPage,
+  NewTicketPage,
   OrderDetailPage,
   OrdersPage,
   ProfilePage,
   SettingsPage,
+  SupportPage,
+  SupportTicketPage,
 } from "../../features/account";
+import { ContactPage } from "../../features/support";
 import {
   OfferFormPage,
   OffersPage,
@@ -51,8 +57,11 @@ import {
   SellerShopLayout,
   ShopDeliveryPage,
   ShopInfoPage,
+  ShopNewTicketPage,
   ShopOrderPage,
   ShopOrdersPage,
+  ShopSupportPage,
+  ShopSupportTicketPage,
 } from "../../features/seller";
 import { SiteLayout } from "../../shared/layout";
 import { ROUTES } from "./routes";
@@ -88,6 +97,9 @@ export const AppRouter = () => (
               <Route index element={<SellerDashboardPage />} />
               <Route path={ROUTES.sellerOrders} element={<ShopOrdersPage />} />
               <Route path={ROUTES.sellerOrder} element={<ShopOrderPage />} />
+              <Route path={ROUTES.sellerSupport} element={<ShopSupportPage />} />
+              <Route path={ROUTES.sellerSupportNew} element={<ShopNewTicketPage />} />
+              <Route path={ROUTES.sellerSupportTicket} element={<ShopSupportTicketPage />} />
               <Route path={ROUTES.sellerProducts} element={<OffersPage />} />
               <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
               <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
@@ -113,6 +125,7 @@ export const AppRouter = () => (
         <Route path={ROUTES.promotions} element={<PromotionsPage />} />
         <Route path={ROUTES.boutiques} element={<ShopsPage />} />
         <Route path={ROUTES.boutique} element={<ShopPage />} />
+        <Route path={ROUTES.contact} element={<ContactPage />} />
 
         {/* `/familles` sans identifiant mène à la même carte du catalogue. */}
         <Route path="/familles" element={<Navigate to={ROUTES.catalogue} replace />} />
@@ -135,18 +148,23 @@ export const AppRouter = () => (
           <Route path={ROUTES.accountAddressEdit} element={<AddressFormPage />} />
           <Route path={ROUTES.accountProfile} element={<ProfilePage />} />
           <Route path={ROUTES.accountSettings} element={<SettingsPage />} />
+          <Route path={ROUTES.accountSupport} element={<SupportPage />} />
+          <Route path={ROUTES.accountSupportNew} element={<NewTicketPage />} />
+          <Route path={ROUTES.accountSupportTicket} element={<SupportTicketPage />} />
           <Route path={ROUTES.accountShopRequest} element={<ShopRequestStatusPage />} />
           <Route path={ROUTES.accountShopRequestNew} element={<ShopRequestFormPage />} />
 
           {/* Administration : comptes admin seulement. L'accueil de l'espace
               est la file des demandes de boutique à examiner ; les commandes
-              et les litiges ont leur rubrique. */}
+              et les litiges, le support et la modération ont leur rubrique. */}
           <Route element={<AdminGuard />}>
             <Route path={ROUTES.admin} element={<Navigate to={ROUTES.adminShopRequests} replace />} />
             <Route path={ROUTES.adminShopRequests} element={<ShopRequestsPage />} />
             <Route path={ROUTES.adminShopRequest} element={<ShopRequestReviewPage />} />
             <Route path={ROUTES.adminOrders} element={<AdminOrdersPage />} />
             <Route path={ROUTES.adminOrder} element={<AdminShopOrderPage />} />
+            <Route path={ROUTES.adminSupport} element={<AdminSupportPage />} />
+            <Route path={ROUTES.adminSupportTicket} element={<AdminSupportTicketPage />} />
           </Route>
         </Route>
       </Route>

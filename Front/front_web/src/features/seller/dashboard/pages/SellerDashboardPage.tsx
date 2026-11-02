@@ -8,6 +8,7 @@ import { AccountPanel } from "../../../account";
 import { useAuth } from "../../../auth";
 import { useResource } from "../../../catalog";
 import { fetchShopOrders, useNow } from "../../../orders";
+import { fetchSupportTickets, formatDue, SupportStatusBadge, timeLeft } from "../../../support";
 import { fetchShopOffers, sellerPaths, useSellerShop } from "../../shared";
 import { OrderQueue } from "../components/OrderQueue";
 import styles from "./SellerDashboardPage.module.css";
@@ -31,23 +32,25 @@ const dayFormat = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "nume
 //  ce qui expire bientôt, et les produits qui vont manquer.
 // ─────────────────────────────────────────────
 export const SellerDashboardPage = () => {
-  const { shop, orderCounts } = useSellerShop();
+  const { shop, orderCounts, supportCounts } = useSellerShop();
   const { user } = useAuth();
   const now = useNow();
   useDocumentTitle(`Tableau de bord — ${shop.nom}`);
 
   const load = useCallback(
     async (signal: AbortSignal) => {
-      const [todo, issues, offers] = await Promise.all([
+      const [todo, issues, offers, support] = await Promise.all([
         fetchShopOrders({ boutiqueId: shop.id, group: "todo", limit: QUEUE_SIZE }, signal),
         fetchShopOrders({ boutiqueId: shop.id, group: "issues", limit: QUEUE_SIZE }, signal),
         fetchShopOffers(shop.id, 1, 100, signal),
+        fetchSupportTickets({ scope: "shop", boutiqueId: shop.id, tab: "todo", limit: QUEUE_SIZE }, signal),
       ]);
       const lowStock: ProductBoutique[] = offers.items
         .filter((offer) => offer.stock <= LOW_STOCK)
         .sort((a, b) => a.stock - b.stock)
         .slice(0, QUEUE_SIZE);
-      return { todo, issues, lowStock };
+      const hidden = offers.items.filter((offer) => offer.hidden).length;
+      return { todo, issues, lowStock, support, hidden };
     },
     [shop.id]
   );
@@ -82,6 +85,20 @@ export const SellerDashboardPage = () => {
 
       {data.error ? <Alert tone="danger">{data.error}</Alert> : null}
 
+      {shop.suspendedUntil ? (
+        <Alert tone="danger">
+          Boutique suspendue jusqu'au {new Date(shop.suspendedUntil).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} :
+          aucune nouvelle commande d'ici là. Le motif et la contestation sont dans{" "}
+          <Link to={sellerPaths.support(shop.id)}>Support</Link>.
+        </Alert>
+      ) : null}
+      {data.data && data.data.hidden > 0 ? (
+        <Alert tone="warning">
+          {data.data.hidden > 1 ? `${data.data.hidden} annonces sont masquées` : "Une annonce est masquée"} par la modération : les clients
+          ne les voient plus. <Link to={sellerPaths.support(shop.id)}>Voir les mesures</Link>
+        </Alert>
+      ) : null}
+
       <div className={styles.grid}>
         <AccountPanel
           title="À confirmer"
@@ -113,6 +130,40 @@ export const SellerDashboardPage = () => {
               showStatus
               empty="Aucun problème en cours."
             />
+          ) : (
+            <div className={styles.skeleton} aria-hidden="true" />
+          )}
+        </AccountPanel>
+
+        <AccountPanel
+          title="Réclamations"
+          description="Les clients attendent votre réponse sous 48 heures ; sans elle, l'équipe de la plateforme tranche."
+          more={{ to: sellerPaths.support(shop.id), label: `Support${supportCounts?.todo ? ` (${supportCounts.todo})` : ""}` }}
+        >
+          {data.data ? (
+            data.data.support.items.length === 0 ? (
+              <p className={styles.empty}>Aucune réclamation à traiter.</p>
+            ) : (
+              <ul className={styles.stock}>
+                {data.data.support.items.map((ticket) => (
+                  <li key={ticket.id}>
+                    <Link className={[styles.stockRow, styles.ticketRow].join(" ")} to={sellerPaths.supportTicket(shop.id, ticket.id)}>
+                      <span className={styles.stockName}>
+                        {ticket.number} · {ticket.subject}
+                      </span>
+                      <span className={styles.ticketSide}>
+                        <SupportStatusBadge ticket={ticket} />
+                        {ticket.deadlineAt ? (
+                          <span className={styles.ticketDue}>
+                            {formatDue(ticket.deadlineAt)} · {timeLeft(ticket.deadlineAt, now)}
+                          </span>
+                        ) : null}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )
           ) : (
             <div className={styles.skeleton} aria-hidden="true" />
           )}

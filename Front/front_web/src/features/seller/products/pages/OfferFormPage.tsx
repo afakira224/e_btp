@@ -102,6 +102,12 @@ export const OfferFormPage = () => {
     <div className={styles.page}>
       {back}
       {shopDelivery.error ? <Alert tone="warning">{shopDelivery.error}</Alert> : null}
+      {offer.data?.hidden ? (
+        <Alert tone="danger">
+          Annonce masquée par la modération{offer.data.hidden.reason ? ` : ${offer.data.hidden.reason}` : ""}. Les clients ne la
+          voient plus. Corrigez-la, puis demandez sa remise en ligne dans <Link to={sellerPaths.support(shop.id)}>Support</Link>.
+        </Alert>
+      ) : null}
       <AccountPanel
         title={title}
         description={

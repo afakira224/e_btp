@@ -24,10 +24,15 @@ export const shopDeliveryOf = (shopId: string): MockShopDelivery =>
   readDb().shopDeliveries[shopId] ?? seedShopDelivery(shopId);
 
 /** Boutique telle que toShopResponseDto l'imbrique : avec ses réglages de livraison. */
-export const liveShop = (shop: Shop): Shop => ({
-  ...shop,
-  delivery: toSettingsDto(shopDeliveryOf(shop.id)),
-});
+export const liveShop = (shop: Shop): Shop => {
+  const until = readDb().moderation.suspendedShops[shop.id];
+  return {
+    ...shop,
+    delivery: toSettingsDto(shopDeliveryOf(shop.id)),
+    // Comme toShopResponseDto : la date n'apparaît que pendant la suspension.
+    ...(until && new Date(until).getTime() > Date.now() ? { suspendedUntil: until } : {}),
+  };
+};
 
 /**
  * Toutes les boutiques : celles du catalogue de départ, modifications de
@@ -51,7 +56,10 @@ export const findShop = (id: string): Shop | undefined => {
  */
 export const rawShop = (shop: Shop) => {
   const { id, ...rest } = shop;
-  return { _id: id, ...rest, delivery: shopDeliveryOf(id), deletedAt: null, __v: 0 };
+  // Le document porte la date de suspension telle qu'enregistrée, passée ou
+  // non (null une fois levée) : c'est au lecteur de la comparer à maintenant.
+  const suspendedUntil = readDb().moderation.suspendedShops[id] ?? null;
+  return { _id: id, ...rest, suspendedUntil, delivery: shopDeliveryOf(id), deletedAt: null, __v: 0 };
 };
 
 /** Configuration propre ou héritage d'une offre, telle qu'elle est stockée. */
@@ -109,13 +117,31 @@ const fromSeller = (offer: MockOffer, shops: Map<string, Shop>): ProductBoutique
   };
 };
 
+/** Masquage par la modération, porté par l'offre comme dans le DTO du back. */
+const withModeration = (offer: ProductBoutique): ProductBoutique => {
+  const hidden = readDb().moderation.hiddenOffers[offer.id];
+  return hidden ? { ...offer, hidden } : offer;
+};
+
 /** Toutes les offres, réglages des vendeurs appliqués. Les plus récentes d'abord. */
 export const liveCatalog = (): ProductBoutique[] => {
   const shops = new Map(allShops().map((shop) => [shop.id, liveShop(shop)]));
   const added = [...readDb().offers]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((offer) => fromSeller(offer, shops));
-  return [...added, ...OFFERS.map((offer) => fromSeed(offer, shops))];
+  return [...added, ...OFFERS.map((offer) => fromSeed(offer, shops))].map(withModeration);
+};
+
+/** Ce que le public voit : sans les offres masquées par la modération. */
+export const publicCatalog = (): ProductBoutique[] => liveCatalog().filter((offer) => !offer.hidden);
+
+/** Le compte connecté gère-t-il cette boutique (son gérant, ou l'administration) ? */
+export const viewerManages = (shopId: string | undefined): boolean => {
+  const db = readDb();
+  const user = db.users.find((candidate) => candidate._id === db.sessionUserId);
+  if (!user || !shopId) return false;
+  if (user.role === "admin") return true;
+  return user.role === "shop" && allShops().find((shop) => shop.id === shopId)?.ownerId === user._id;
 };
 
 export const findLiveOffer = (id: string): ProductBoutique | undefined =>

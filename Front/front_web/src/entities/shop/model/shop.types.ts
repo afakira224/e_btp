@@ -24,6 +24,8 @@ export interface Shop {
    * brut, sans `options` : la page de réglages lit GET /shops/:id/delivery.
    */
   delivery?: DeliverySettings | undefined;
+  /** Présent seulement pendant une suspension : plus de nouvelle commande d'ici là. */
+  suspendedUntil?: string | undefined;
   /** Le DTO déclare `Date` ; sérialisé en JSON, le front reçoit une chaîne. */
   createdAt: string;
   updatedAt: string;

@@ -69,6 +69,10 @@ Le mock ne route que ce que le back monte, avec les mêmes paramètres :
 | `POST /shop-requests` · `GET /shop-requests/mine` · `PATCH /shop-requests/:id/cancel` | Demande d'ouverture de boutique, suivi, retrait |
 | `GET /shop-requests?status=&search=&page=&limit=` · `GET /shop-requests/:id` | File d'examen de l'administration |
 | `PATCH /shop-requests/:id/approve` · `PATCH /shop-requests/:id/reject` | Ouverture de la boutique, ou refus motivé |
+| `POST /support/tickets` · `POST /support/contact` | Ouvrir une demande (multipart, pièces jointes), formulaire « Nous contacter » d'un visiteur |
+| `GET /support/tickets?scope=&boutiqueId=&tab=&search=&page=` · `GET /support/tickets/:id` | Files du client, de la boutique et de l'administration, avec leurs comptes ; une demande (et son dossier pour l'admin) |
+| `POST /support/tickets/:id/messages` · `PATCH /support/tickets/:id/:action` | Répondre (note interne pour l'admin), proposer, accepter, arbitrer, trancher, faire appel, fermer, rouvrir, noter |
+| `POST /sanctions` · `GET /sanctions` · `GET /sanctions/mine` · `PATCH /sanctions/:id/lift` · `PATCH /sanctions/:id/request-lift` | Mesures de modération : appliquer, lister, les siennes, lever, demander la remise en ligne |
 
 Tris acceptés par `/search` : `newest`, `price_asc`, `price_desc`, `rating`,
 `popular`.
@@ -136,12 +140,17 @@ Deux comptes servent le parcours d'ouverture de boutique (même mot de passe) :
 Le compte `mamadou@btp.com` n'a déposé aucune demande : c'est lui qui permet
 de suivre le parcours depuis le début.
 
+Côté support, `mamadou@btp.com` a déjà cinq demandes : un retard chez Volta
+Électrique (la boutique doit répondre), deux retours (l'un chez la boutique,
+l'autre en litige chez l'administration), le signalement d'une annonce de Pro
+Outillage et une question traitée.
+
 En mode simulé, le catalogue de départ est figé dans `catalogSeed.ts` ; ce
 qu'en font les vendeurs (réglages de livraison, prix, stock, offres ajoutées)
 est rangé dans la base simulée et appliqué à la lecture par `liveCatalog.ts`.
 Les règles de livraison (`deliveryRules.ts`) et celles du cycle de vie des
-commandes (`shopOrderRules.ts`) sont des portages de celles du back, messages
-compris. Les délais automatiques (expiration, clôture, litige) que le serveur
+commandes (`shopOrderRules.ts`) et du support (`supportRules.ts`) sont des
+portages de celles du back, messages compris. Les délais automatiques (expiration, clôture, litige) que le serveur
 applique toutes les 15 minutes s'appliquent ici à chaque lecture, à la date de
 leur échéance. Une base enregistrée avant les sous-commandes reçoit les siennes
 à la lecture (`legacyOrders.ts`), comme avec `npm run migrate:shop-orders`. Les photos ajoutées en mode simulé sont des URL d'objet : elles
@@ -461,6 +470,33 @@ demander un retour (puis terminée), 48 h pour répondre à un retour (sinon
 litige). Les montants remboursés suivent la règle du back : tout, sauf les frais
 de livraison quand le client a causé l'échec de livraison.
 
+## Support et signalements
+
+Litiges, signalements et questions sont des **demandes** (feature `support`),
+avec leur fil d'échanges, leurs pièces jointes et leurs échéances. Comme pour
+les commandes, le front n'affiche que les actions renvoyées par le serveur
+(`availableActions`) et ouvre sur place le formulaire de chacune.
+
+| Qui | Où | Ce qu'il fait |
+| --- | --- | --- |
+| Visiteur | `/contact` (« Nous contacter » du pied de page) | Laisse son nom, son email et sa question ; la réponse part par email |
+| Client | `/compte/support` | Ses demandes, en cours et terminées ; « Signaler un problème » sous chaque boutique d'une commande, « Signaler cette annonce » sur la fiche produit, « Signaler cette boutique » sur sa vitrine ; accepte une proposition ou demande l'arbitrage, fait appel d'une décision, note la réponse ; conteste une mesure qui le vise |
+| Boutique | `/ma-boutique/:id/support` | Onglets à traiter · chez le client · chez l'administration · terminées, compte « à traiter » dans le menu et sur le tableau de bord ; propose une solution (nouvelle livraison, remboursement, échange, explication) sous 48 h ; « Signaler ce client » depuis une commande ; voit ses mesures, demande la remise en ligne d'une annonce corrigée, conteste |
+| Administration | `/admin/support` | Onglets urgentes · à traiter · signalements · en attente · terminées, et les remises en ligne demandées ; sur une demande, le dossier (demandes liées, mesures déjà prises, barème) et le formulaire de mesure : masquer, avertir, suspendre 7, 15 ou 30 jours, bloquer |
+
+Un retour reste conduit depuis la commande (accepter, refuser, trancher le
+litige) : sa demande en suit les étapes et montre la commande liée. Un message
+qui contient un numéro ou un email part quand même, avec un avertissement : tout
+doit se régler sur la plateforme.
+
+Les mesures se voient aussi hors du support : une annonce masquée disparaît du
+catalogue (sa boutique la voit marquée dans ses produits) ; une boutique
+suspendue garde sa vitrine, avec un bandeau, mais ses articles ne s'ajoutent
+plus au panier ; un compte bloqué ne se connecte plus.
+
+Le front ne liste pas encore les avis : un avis se signale par l'API
+(`type: review_report`), sans bouton à l'écran.
+
 ## Ouverture d'une boutique
 
 Un client connecté demande l'ouverture d'une boutique ; l'administration
@@ -500,8 +536,8 @@ de son compte.
 
 Une **application de travail à part du site marchand** : ni bandeau
 promotionnel, ni recherche, ni panier. Barre sombre en haut (marque, compte,
-thème, déconnexion), menu latéral sombre (tableau de bord, commandes avec le
-nombre à traiter, produits, livraison, informations, lien vers la vitrine),
+thème, déconnexion), menu latéral sombre (tableau de bord, commandes et support
+avec le nombre à traiter, produits, livraison, informations, lien vers la vitrine),
 contenu clair : l'architecture « header + sidebar » de la charte graphique.
 Sur mobile, le menu devient un tiroir.
 
@@ -512,7 +548,9 @@ Sur mobile, le menu devient un tiroir.
   demande d'ouverture (`/compte/boutique`).
 - **Tableau de bord** : le nombre de commandes à chaque étape (à confirmer et
   problèmes signalés dès qu'il y en a), les commandes à confirmer avec leur
-  échéance, les problèmes en cours, les produits en stock bas, des raccourcis.
+  échéance, les problèmes en cours, les réclamations à traiter, les produits en
+  stock bas, des raccourcis ; une alerte quand la boutique est suspendue ou
+  qu'une annonce est masquée.
 - **Commandes** : voir « Cycle de vie des commandes ». Le compteur du menu se
   relit après chaque action et toutes les 2 minutes.
 - « Se déconnecter » ramène à la connexion de l'espace ; la page quittée n'est

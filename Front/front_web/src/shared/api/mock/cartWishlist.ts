@@ -167,6 +167,13 @@ export const addToCart = (
   const pb = findOffer(body.productBoutiqueId);
   const quantity = body.quantity ?? 1;
 
+  // Modération : une offre masquée n'est plus en vente, une boutique
+  // suspendue ne prend plus de commande.
+  if (pb.hidden) throw new ApiError("Ce produit n'est plus en vente.", 400);
+  if (pb.boutique?.suspendedUntil) {
+    throw new ApiError(`${pb.boutique.nom} n'accepte pas de commande en ce moment.`, 400);
+  }
+
   const { db, cart } = ensureCart(userId);
   const existing = cart.items.find(
     (item) => item.productBoutiqueId === body.productBoutiqueId

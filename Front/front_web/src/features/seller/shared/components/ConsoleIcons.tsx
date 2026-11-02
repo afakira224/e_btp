@@ -60,6 +60,13 @@ export const ShopIcon = () => (
   </Icon>
 );
 
+export const SupportIcon = () => (
+  <Icon>
+    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+    <path d="M12 8v4M12 16h.01" />
+  </Icon>
+);
+
 export const ExternalIcon = () => (
   <Icon>
     <path d="M14 4h6v6" />

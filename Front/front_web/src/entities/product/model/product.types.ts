@@ -62,6 +62,9 @@ export interface ProductBoutique {
    */
   delivery?: EffectiveDelivery | undefined;
 
+  /** Présent seulement quand la modération a masqué l'offre : lu par sa boutique. */
+  hidden?: { at: string; reason?: string | undefined } | undefined;
+
   createdAt: string;
   updatedAt: string;
 }

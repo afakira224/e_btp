@@ -1,0 +1,53 @@
+.form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 720px;
+}
+
+.intro {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.type {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.target {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.files {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.fileLabel {
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.fileHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

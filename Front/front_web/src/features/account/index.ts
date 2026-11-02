@@ -6,6 +6,7 @@ export { OrderDetailPage, OrdersPage, type OrderDetailState } from "./orders";
 export { AddressesPage, AddressFormPage, type AddressFormState } from "./addresses";
 export { ProfilePage } from "./profile";
 export { SettingsPage } from "./settings";
+export { NewTicketPage, SupportPage, SupportTicketPage } from "./support";
 
 // Cadre et blocs de page, repris par l'espace vendeur, le parcours
 // d'ouverture de boutique et l'administration pour rester homogènes.

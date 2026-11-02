@@ -7,6 +7,7 @@ export { SellerLoginPage } from "./login";
 export { SellerDashboardPage } from "./dashboard";
 export { SellerHomePage } from "./shops";
 export { ShopOrderPage, ShopOrdersPage } from "./orders";
+export { ShopNewTicketPage, ShopSupportPage, ShopSupportTicketPage } from "./support";
 export { ShopDeliveryPage } from "./delivery";
 export { OfferFormPage, OffersPage } from "./products";
 export { ShopInfoPage } from "./settings";

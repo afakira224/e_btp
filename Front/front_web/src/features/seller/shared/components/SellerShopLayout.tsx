@@ -8,6 +8,7 @@ import { useResource } from "../../../catalog";
 import { fetchShop } from "../../../shops";
 import { canManageShop, fetchManagedShops } from "../api/seller.api";
 import { useShopOrderCounts } from "../hooks/useShopOrderCounts";
+import { useShopSupportCounts } from "../hooks/useShopSupportCounts";
 import type { SellerShopContext } from "../hooks/useSellerShop";
 import { sellerPaths } from "../utils/paths";
 import {
@@ -18,6 +19,7 @@ import {
   OrdersIcon,
   ProductsIcon,
   ShopIcon,
+  SupportIcon,
 } from "./ConsoleIcons";
 import styles from "./SellerShopLayout.module.css";
 
@@ -42,6 +44,13 @@ const SECTIONS: readonly {
     lede: "Confirmez, préparez, livrez — et répondez aux retours avant leur échéance.",
     icon: <OrdersIcon />,
     path: sellerPaths.orders,
+  },
+  {
+    key: "support",
+    label: "Support",
+    lede: "Les réclamations des clients, vos signalements et les mesures de l'équipe de la plateforme.",
+    icon: <SupportIcon />,
+    path: sellerPaths.support,
   },
   {
     key: "produits",
@@ -95,6 +104,8 @@ export const SellerShopLayout = () => {
   // foi : le menu suit sans relecture, et la rubrique reste montée.
   const [updated, setUpdated] = useState<Shop | null>(null);
   const { counts, refresh } = useShopOrderCounts(boutiqueId);
+  const support = useShopSupportCounts(boutiqueId);
+  const refreshSupport = support.refresh;
 
   // Plusieurs boutiques (ou l'administration) : un lien ramène au choix.
   const loadShops = useCallback(
@@ -122,7 +133,8 @@ export const SellerShopLayout = () => {
   // relit aussi les compteurs du menu.
   useEffect(() => {
     void refresh();
-  }, [pathname, refresh]);
+    void refreshSupport();
+  }, [pathname, refresh, refreshSupport]);
 
   const segment = pathname.split("/")[3] ?? "";
   const section = SECTIONS.find((candidate) => candidate.key === segment) ?? SECTIONS[0]!;
@@ -165,11 +177,15 @@ export const SellerShopLayout = () => {
   }
 
   const waiting = counts ? counts.todo + counts.issues : 0;
+  const supportWaiting = support.counts?.todo ?? 0;
+  const badges: Record<string, number> = { commandes: waiting, support: supportWaiting };
   const context: SellerShopContext = {
     shop: data,
     onShopUpdated: setUpdated,
     orderCounts: counts,
     refreshOrderCounts: () => void refresh(),
+    supportCounts: support.counts,
+    refreshSupportCounts: () => void refreshSupport(),
   };
 
   return (
@@ -196,9 +212,9 @@ export const SellerShopLayout = () => {
             <NavLink key={item.key || "dashboard"} className={itemClass} to={item.path(data.id)} end={item.key === ""}>
               <span className={styles.icon}>{item.icon}</span>
               <span className={styles.label}>{item.label}</span>
-              {item.key === "commandes" && waiting > 0 ? (
-                <span className={styles.badge} aria-label={`${waiting} à traiter`}>
-                  {waiting}
+              {(badges[item.key] ?? 0) > 0 ? (
+                <span className={styles.badge} aria-label={`${badges[item.key]} à traiter`}>
+                  {badges[item.key]}
                 </span>
               ) : null}
             </NavLink>
@@ -236,7 +252,7 @@ export const SellerShopLayout = () => {
             Menu
           </button>
           <span className={styles.mobileShop}>{data.nom}</span>
-          {waiting > 0 ? <span className={styles.badge}>{waiting}</span> : null}
+          {waiting + supportWaiting > 0 ? <span className={styles.badge}>{waiting + supportWaiting}</span> : null}
         </div>
 
         <header className={styles.head}>

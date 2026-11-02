@@ -62,6 +62,19 @@ export const ShopOrderPage = () => {
           replace(next);
           refreshOrderCounts();
         }}
+        aside={
+          <p className={styles.report}>
+            Absences répétées, menaces, retours abusifs ?{" "}
+            <Link
+              to={sellerPaths.newSupport(shop.id, "customer_report", {
+                id: part.id,
+                label: `${part.customer ? `${part.customer.prenom} ${part.customer.nom}`.trim() : "Client"} — commande ${part.reference}`,
+              })}
+            >
+              Signaler ce client
+            </Link>
+          </p>
+        }
       />
     </div>
   );

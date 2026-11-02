@@ -8,6 +8,9 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
 /** Rubriques de l'administration, sous l'en-tête de chaque liste. */
 export const AdminNav = () => (
   <nav className={styles.tabs} aria-label="Rubriques de l'administration">
+    <NavLink className={tabClass} to={adminPaths.support}>
+      Support
+    </NavLink>
     <NavLink className={tabClass} to={adminPaths.orders}>
       Commandes et litiges
     </NavLink>

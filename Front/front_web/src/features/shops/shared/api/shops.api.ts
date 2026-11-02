@@ -11,7 +11,11 @@ import type { Shop } from "../../../../entities/shop";
 //  se met à renvoyer le DTO, rien ne change côté front.
 // ─────────────────────────────────────────────
 
-type RawShop = Omit<Shop, "id"> & { id?: string; _id?: string };
+type RawShop = Omit<Shop, "id" | "suspendedUntil"> & { id?: string; _id?: string; suspendedUntil?: string | null };
+
+/** Le document brut garde une suspension échue : seule une date à venir compte. */
+const activeSuspension = (until: string | null | undefined) =>
+  until && new Date(until).getTime() > Date.now() ? { suspendedUntil: until } : {};
 
 /**
  * Liste blanche des champs repris : tout ce qui n'est pas nommé ici — le
@@ -26,6 +30,7 @@ const toShop = (raw: RawShop): Shop => ({
   logo: raw.logo,
   email: raw.email,
   adresse: raw.adresse,
+  ...activeSuspension(raw.suspendedUntil),
   createdAt: raw.createdAt,
   updatedAt: raw.updatedAt,
 });

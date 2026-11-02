@@ -9,6 +9,14 @@ import {
 } from "../../../entities/shop-request";
 import { seedAccountFor, type MockAddress, type MockOrder, type MockShopOrder } from "./accountSeed";
 import { migrateLegacyOrders } from "./legacyOrders";
+import {
+  EMPTY_MODERATION,
+  seedSupportFor,
+  type MockModeration,
+  type MockSanction,
+  type MockSupportMessage,
+  type MockSupportTicket,
+} from "./supportSeed";
 import { SHOPS } from "./catalogSeed";
 
 // ─────────────────────────────────────────────
@@ -145,6 +153,13 @@ export interface MockDb {
   orders: MockOrder[];
   /** Sous-commandes : une par boutique de chaque commande. */
   shopOrders: MockShopOrder[];
+  /** Support : demandes, leurs messages, les sanctions et leurs effets. */
+  supportTickets: MockSupportTicket[];
+  supportMessages: MockSupportMessage[];
+  sanctions: MockSanction[];
+  /** Dernier numéro de demande attribué (SUP-000123). */
+  supportSeq: number;
+  moderation: MockModeration;
   /** Réglages de livraison enregistrés par les boutiques, par identifiant. */
   shopDeliveries: Record<string, MockShopDelivery>;
   /** Modifications des offres du catalogue de départ, par identifiant. */
@@ -372,6 +387,7 @@ const seed = (): MockDb => {
     addresses: demo.addresses,
     orders: demo.orders,
     shopOrders: demo.shopOrders,
+    ...supportOf(users[0], demo.shopOrders),
     shopDeliveries: {},
     offerPatches: {},
     offers: [],
@@ -381,6 +397,24 @@ const seed = (): MockDb => {
     sessionUserId: null,
     otherSessions: 2,
   });
+};
+
+/** Demandes de démonstration et état de modération vierge. */
+const supportOf = (user: User | undefined, shopOrders: MockDb["shopOrders"]) => {
+  const support = seedSupportFor(user, shopOrders);
+  return {
+    supportTickets: support.tickets,
+    supportMessages: support.messages,
+    sanctions: [],
+    supportSeq: support.seq,
+    moderation: { ...EMPTY_MODERATION },
+  };
+};
+
+/** Base écrite avant l'arrivée du support : les demandes de démonstration la rejoignent. */
+const withSupportData = (db: MockDb, hadSupport: boolean): MockDb => {
+  if (hadSupport) return db;
+  return { ...db, ...supportOf(db.users.find((user) => user.email === DEMO_EMAIL), db.shopOrders) };
 };
 
 /** Base écrite avant l'arrivée des commandes : on dote le compte de démo. */
@@ -410,7 +444,8 @@ export const readDb = (): MockDb => {
       // Une base écrite avant l'arrivée du panier, des favoris ou des
       // commandes n'a pas ces champs : on les comble plutôt que de laisser
       // un `undefined` se propager.
-      cache = migrateLegacyOrders(
+      cache = withSupportData(
+        migrateLegacyOrders(
         withDemoAccounts(
         withAccountData(
           {
@@ -423,6 +458,11 @@ export const readDb = (): MockDb => {
             // vrai back, `deliveries` vaut [] à la lecture.
             orders: (parsed.orders ?? []).map((order) => ({ ...order, deliveries: order.deliveries ?? [] })),
             shopOrders: parsed.shopOrders ?? [],
+            supportTickets: parsed.supportTickets ?? [],
+            supportMessages: parsed.supportMessages ?? [],
+            sanctions: parsed.sanctions ?? [],
+            supportSeq: parsed.supportSeq ?? 0,
+            moderation: { ...EMPTY_MODERATION, ...parsed.moderation },
             shopDeliveries: parsed.shopDeliveries ?? {},
             offerPatches: parsed.offerPatches ?? {},
             offers: parsed.offers ?? [],
@@ -435,6 +475,8 @@ export const readDb = (): MockDb => {
           parsed.orders !== undefined
         )
         )
+        ),
+        parsed.supportTickets !== undefined
       );
       writeDb(cache);
       return cache;

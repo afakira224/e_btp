@@ -115,6 +115,26 @@ li:last-child .stockRow {
   color: var(--color-danger);
 }
 
+/* Une réclamation : l'objet sur sa ligne, le statut et l'échéance dessous. */
+.ticketRow {
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ticketSide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ticketDue {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-mono);
+  color: var(--color-text-muted);
+}
+
 .shortcuts {
   display: grid;
   gap: var(--space-2);

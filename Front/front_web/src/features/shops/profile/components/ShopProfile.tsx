@@ -1,4 +1,7 @@
+import { Link } from "react-router-dom";
 import type { Shop } from "../../../../entities/shop";
+import { Alert } from "../../../../shared/ui";
+import { useAuth } from "../../../auth";
 import { Breadcrumb } from "../../../catalog";
 import { districtOf, formatSince, mapsHref, ShopAvatar } from "../../shared";
 import styles from "./ShopProfile.module.css";
@@ -12,6 +15,10 @@ interface ShopProfileProps {
 
 const plural = (count: number, word: string) => `${word}${count > 1 ? "s" : ""}`;
 
+/** Signaler la boutique : une demande au support, ouverte depuis le compte. */
+const reportPath = (shop: Shop) =>
+  `/compte/support/nouvelle?${new URLSearchParams({ type: "shop_report", cible: shop.id, libelle: shop.nom }).toString()}`;
+
 // ─────────────────────────────────────────────
 //  En-tête d'une boutique : identité, chiffres clés, coordonnées.
 //  Les coordonnées sont de vrais liens (e-mail, itinéraire). Le téléphone
@@ -20,6 +27,8 @@ const plural = (count: number, word: string) => `${word}${count > 1 ? "s" : ""}`
 // ─────────────────────────────────────────────
 export const ShopProfile = ({ shop, articles, promotions }: ShopProfileProps) => {
   const district = districtOf(shop.adresse);
+  const { user } = useAuth();
+  const own = !!user && user._id === shop.ownerId;
 
   return (
     <header className={styles.profile}>
@@ -30,6 +39,17 @@ export const ShopProfile = ({ shop, articles, promotions }: ShopProfileProps) =>
           { label: shop.nom },
         ]}
       />
+
+      {/* Suspendue par la modération : la vitrine reste, les commandes non. */}
+      {shop.suspendedUntil ? (
+        <div className={styles.suspended}>
+          <Alert tone="warning">
+            Cette boutique est suspendue jusqu'au{" "}
+            {new Date(shop.suspendedUntil).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} : ses
+            articles restent visibles, mais elle ne prend plus de commande d'ici là.
+          </Alert>
+        </div>
+      ) : null}
 
       <div className={styles.layout}>
         <div className={styles.identity}>
@@ -95,6 +115,12 @@ export const ShopProfile = ({ shop, articles, promotions }: ShopProfileProps) =>
           {!shop.email && !shop.adresse ? (
             <p className={styles.none}>Cette boutique n'a pas encore renseigné ses coordonnées.</p>
           ) : null}
+
+          {own ? null : (
+            <p className={styles.report}>
+              <Link to={reportPath(shop)}>Signaler cette boutique</Link>
+            </p>
+          )}
         </aside>
       </div>
     </header>

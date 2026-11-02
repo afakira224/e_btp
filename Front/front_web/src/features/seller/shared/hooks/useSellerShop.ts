@@ -11,6 +11,9 @@ export interface SellerShopContext {
   orderCounts: ShopOrderCounts | null;
   /** À appeler après une action sur une commande : le menu suit. */
   refreshOrderCounts: () => void;
+  /** Demandes de support par onglet ; null tant qu'elles ne sont pas lues. */
+  supportCounts: Record<string, number> | null;
+  refreshSupportCounts: () => void;
 }
 
 /** La boutique en cours, chargée et dont le compte est gérant. */

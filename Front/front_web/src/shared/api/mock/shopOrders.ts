@@ -6,6 +6,7 @@ import {
   SHOP_ORDER_GROUP_KEYS,
   SHOP_ORDER_GROUPS,
   SHOP_ORDER_NEGATIVE_END,
+  SHOP_ORDER_TERMINAL,
   ShopOrderActor,
   ShopOrderPaymentStatus,
   ShopOrderStatus,
@@ -19,6 +20,7 @@ import type { ApiResponse } from "../httpClient";
 import type { MockOrder, MockShopOrder } from "./accountSeed";
 import { findLiveOffer, findShop } from "./liveCatalog";
 import { readDb, writeDb, type MockDb } from "./mockDb";
+import { syncReturnTicket } from "./supportReturns";
 import {
   ACTION_RULES,
   AUTO_ACTIONS,
@@ -125,6 +127,15 @@ const syncOrderStatus = (db: MockDb, orderId: string, now: string): MockOrder | 
   }
   return order;
 };
+
+const RETURN_TICKET_ACTIONS: readonly AnyAction[] = [
+  "return",
+  "accept-return",
+  "reject-return",
+  "escalate",
+  "resolve-dispute",
+  "confirm-refund",
+];
 
 const DEFAULT_NOTES: Partial<Record<AnyAction, string>> = {
   escalate: "La boutique n'a pas répondu au retour sous 48 heures.",
@@ -247,6 +258,10 @@ export const applyAction = (
   });
   part.updatedAt = stamp;
   syncOrderStatus(db, part.orderId, stamp);
+  // Un retour a sa demande de support : elle suit chaque étape de la sous-commande.
+  if (RETURN_TICKET_ACTIONS.includes(action) || (part.return && SHOP_ORDER_TERMINAL.includes(part.status))) {
+    syncReturnTicket(db, part, action, input, now, userId);
+  }
 
   return { from, refund };
 };

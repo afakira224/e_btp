@@ -133,6 +133,21 @@
   color: var(--color-text-muted);
 }
 
+.suspended {
+  margin-block: var(--space-4);
+}
+
+.report {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+}
+
+.report a {
+  color: var(--color-text-muted);
+}
+
 .visuallyHidden {
   position: absolute;
   width: 1px;

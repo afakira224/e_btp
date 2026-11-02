@@ -32,6 +32,10 @@ import { BuyBox } from "../components/BuyBox";
 import { ProductStrip } from "../components/ProductStrip";
 import styles from "../components/ProductDetail.module.css";
 
+/** Ouvrir une demande au support sur cette cible (feature support, compte client). */
+const reportPath = (type: string, id: string, label: string) =>
+  `/compte/support/nouvelle?${new URLSearchParams({ type, cible: id, libelle: label }).toString()}`;
+
 // ─────────────────────────────────────────────
 //  Fiche produit.
 //  L'identifiant de l'URL est celui de l'offre (`product_boutique`), pas
@@ -224,6 +228,15 @@ export const ProductPage = () => {
               ) : null}
             </dl>
           </div>
+
+          {/* Le gérant ne signale pas sa propre annonce. Le lien mène au
+              compte : un visiteur passe d'abord par la connexion. */}
+          {item.boutique && item.boutique.ownerId !== userId ? (
+            <p className={styles.report}>
+              Un problème avec cette annonce ?{" "}
+              <Link to={reportPath("listing_report", item.id, `${productName(item)} — ${shopName(item)}`)}>Signaler cette annonce</Link>
+            </p>
+          ) : null}
         </div>
       </div>
 

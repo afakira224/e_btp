@@ -11,6 +11,10 @@ export const ROUTES = {
   accountAddressEdit: "/compte/adresses/:addressId/modifier",
   accountProfile: "/compte/profil",
   accountSettings: "/compte/parametres",
+  // Support : demandes à une boutique ou à l'équipe, signalements, mesures.
+  accountSupport: "/compte/support",
+  accountSupportNew: "/compte/support/nouvelle",
+  accountSupportTicket: "/compte/support/:ticketId",
   // Ouverture d'une boutique : questionnaire, puis suivi de la demande.
   accountShopRequest: "/compte/boutique",
   accountShopRequestNew: "/compte/boutique/demande",
@@ -24,14 +28,20 @@ export const ROUTES = {
   sellerProducts: "/ma-boutique/:boutiqueId/produits",
   sellerProductNew: "/ma-boutique/:boutiqueId/produits/nouveau",
   sellerProductEdit: "/ma-boutique/:boutiqueId/produits/:offreId/modifier",
+  sellerSupport: "/ma-boutique/:boutiqueId/support",
+  sellerSupportNew: "/ma-boutique/:boutiqueId/support/nouvelle",
+  sellerSupportTicket: "/ma-boutique/:boutiqueId/support/:ticketId",
   sellerDelivery: "/ma-boutique/:boutiqueId/livraison",
   sellerInfo: "/ma-boutique/:boutiqueId/informations",
-  // Administration : demandes d'ouverture de boutique, commandes et litiges.
+  // Administration : demandes d'ouverture de boutique, commandes et litiges,
+  // support et modération.
   admin: "/admin",
   adminShopRequests: "/admin/demandes-boutique",
   adminShopRequest: "/admin/demandes-boutique/:requestId",
   adminOrders: "/admin/commandes",
   adminOrder: "/admin/commandes/:partId",
+  adminSupport: "/admin/support",
+  adminSupportTicket: "/admin/support/:ticketId",
   panier: "/panier",
   // Tunnel de commande : livraison par boutique, adresse, paiement, confirmation.
   commande: "/commande",
@@ -44,6 +54,8 @@ export const ROUTES = {
   promotions: "/promotions",
   boutiques: "/boutiques",
   boutique: "/boutiques/:boutiqueId",
+  // Nous contacter : public, un visiteur y laisse son email.
+  contact: "/contact",
 
   // Catalogue — `/categories` est la racine de navigation : elle affiche
   // les domaines et leurs catégories, ce que vise « voir tout le catalogue ».

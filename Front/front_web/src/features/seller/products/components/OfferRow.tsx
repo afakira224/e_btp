@@ -26,6 +26,11 @@ export const OfferRow = ({ shopId, offer }: { shopId: string; offer: ProductBout
 
       <div className={styles.body}>
         <span className={styles.name}>{name}</span>
+        {offer.hidden ? (
+          <span className={styles.hidden}>
+            Masquée par la modération{offer.hidden.reason ? ` — ${offer.hidden.reason}` : ""} · voir Support
+          </span>
+        ) : null}
         <span className={styles.meta}>
           {formatPrice(effectivePrice(offer))}
           {hasDiscount(offer) ? <s className={styles.was}>{formatPrice(offer.price)}</s> : null}

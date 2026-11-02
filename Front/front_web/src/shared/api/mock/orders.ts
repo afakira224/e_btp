@@ -153,6 +153,15 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
     );
   }
 
+  // Modération : offre masquée, boutique suspendue.
+  if (lines.some(({ offer }) => offer!.hidden)) {
+    throw new ApiError("Un produit du panier a été retiré de la vente : retirez-le pour commander.", 400);
+  }
+  const suspended = lines.find(({ offer }) => offer!.boutique?.suspendedUntil)?.offer?.boutique;
+  if (suspended) {
+    throw new ApiError(`${suspended.nom} n'accepte pas de commande en ce moment : retirez ses articles pour commander.`, 400);
+  }
+
   // ── Livraisons : une par boutique ─────────
   const quote = quoteDelivery(
     lines.map(({ item, offer }) => ({ offer: offer!, quantity: item.quantity })),

@@ -9,6 +9,7 @@ import {
   OrderStatus,
   PAYMENT_METHOD_LABELS,
   PaymentMethod,
+  ShopOrderStatus,
   type Order,
   type ShopOrder,
 } from "../../../../entities/order";
@@ -25,6 +26,7 @@ import {
   ShopOrderPanel,
   timeLeft,
 } from "../../../orders";
+import { supportPaths } from "../../../support";
 import {
   AccountHeader,
   AccountPage,
@@ -197,6 +199,13 @@ export const OrderDetailPage = () => {
               viewer="client"
               title={<Link to={`/boutiques/${part.boutique.id}`}>{part.boutique.nom ?? "Boutique"}</Link>}
               onUpdated={onPartUpdated}
+              footer={
+                part.status === ShopOrderStatus.AWAITING_PAYMENT ? undefined : (
+                  <Link to={supportPaths.create("order_problem", { id: part.id, label: `Commande ${part.reference} — ${part.boutique.nom ?? "boutique"}` })}>
+                    Signaler un problème
+                  </Link>
+                )
+              }
             />
           ))}
         </div>

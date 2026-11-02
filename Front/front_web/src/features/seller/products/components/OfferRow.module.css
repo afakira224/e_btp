@@ -61,3 +61,11 @@
     grid-row: 2;
   }
 }
+
+/* Masquée par la modération : invisible des clients tant qu'elle n'est pas remise en ligne. */
+.hidden {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}
