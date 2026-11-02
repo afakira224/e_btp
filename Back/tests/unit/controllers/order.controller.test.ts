@@ -480,6 +480,52 @@ describe("createOrder", () => {
 });
 
 // ─────────────────────────────────────────────
+describe("createOrder — modération", () => {
+  const order = async () => {
+    const res = mockResponse();
+    await createOrder(mockRequest({ params: { userId: oid().toString() }, body: checkout() }), res);
+    return res;
+  };
+
+  it("refuse un panier contenant une offre masquée, sans toucher au stock", async () => {
+    const { pb } = setupCheckout({ stock: 10 });
+    pb.hiddenAt = new Date("2026-10-01T00:00:00.000Z");
+
+    const res = await order();
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Un produit du panier a été retiré de la vente : retirez-le pour commander.");
+    expect(session.abortTransaction).toHaveBeenCalled();
+    expect(OrderMock.create).not.toHaveBeenCalled();
+    expect(pb.stock).toBe(10);
+  });
+
+  it("refuse un panier dont la boutique est suspendue", async () => {
+    const { shop } = setupCheckout();
+    shop.nom = "Boutique Kaloum";
+    shop.suspendedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const res = await order();
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Boutique Kaloum n'accepte pas de commande en ce moment : retirez ses articles pour commander.");
+    expect(session.abortTransaction).toHaveBeenCalled();
+    expect(OrderMock.create).not.toHaveBeenCalled();
+    expect(ShopOrderMock.create).not.toHaveBeenCalled();
+  });
+
+  it("accepte la commande une fois la suspension terminée", async () => {
+    const { shop } = setupCheckout();
+    shop.suspendedUntil = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const res = await order();
+
+    expect(res.statusCode).toBe(201);
+    expect(OrderMock.create).toHaveBeenCalledOnce();
+  });
+});
+
+// ─────────────────────────────────────────────
 describe("getOrders", () => {
   it("pagine avec les valeurs par défaut", async () => {
     const query = mockQuery([]);

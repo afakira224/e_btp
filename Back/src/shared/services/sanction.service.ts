@@ -1,4 +1,4 @@
-import { Types } from "mongoose";
+import { Types, type ClientSession } from "mongoose";
 import { Shop } from "../../models/boutique.model.js";
 import { Product, productBoutique } from "../../models/product.model.js";
 import { Review } from "../../models/review.model.js";
@@ -259,6 +259,32 @@ export const applySanction = async (input: ApplySanctionInput): Promise<ISanctio
   return sanction;
 };
 
+/**
+ * Ce qui suspend encore une boutique quand la mesure `excludedId` est levée :
+ * le blocage de son gérant (date sans fin), sinon la plus lointaine des
+ * suspensions en cours, sinon rien. Lever une mesure ne rouvre donc jamais
+ * une boutique qu'une autre mesure tient fermée.
+ */
+const remainingSuspension = async (
+  shopId: Types.ObjectId | string,
+  excludedId: Types.ObjectId,
+  now: Date,
+  session: ClientSession
+): Promise<Date | null> => {
+  const id = new Types.ObjectId(String(shopId));
+  const active = await Sanction.find({
+    _id: { $ne: excludedId },
+    liftedAt: null,
+    $or: [
+      { type: SanctionType.SUSPENSION, "target.kind": SanctionTargetKind.SHOP, "target.id": id, endsAt: { $gt: now } },
+      { type: SanctionType.BLOCK, suspendedShopIds: id },
+    ],
+  }).session(session);
+  if (active.some((other) => other.type === SanctionType.BLOCK)) return FAR_FUTURE;
+  const ends = active.map((other) => other.endsAt?.getTime() ?? 0).filter((time) => time > now.getTime());
+  return ends.length > 0 ? new Date(Math.max(...ends)) : null;
+};
+
 export const liftSanction = async (id: string, by: string | null, reason: string | undefined, now = new Date()): Promise<ISanction> => {
   const sanction = await runInTransaction(async (session) => {
     const found = await Sanction.findById(id).session(session);
@@ -286,8 +312,8 @@ export const liftSanction = async (id: string, by: string | null, reason: string
         break;
       case SanctionType.SUSPENSION: {
         const shop = await Shop.findById(targetId).session(session);
-        if (shop && shop.suspendedUntil && shop.suspendedUntil.getTime() !== FAR_FUTURE.getTime()) {
-          shop.suspendedUntil = null;
+        if (shop && shop.suspendedUntil) {
+          shop.suspendedUntil = await remainingSuspension(shop._id as Types.ObjectId, found._id as Types.ObjectId, now, session);
           await shop.save({ session });
         }
         break;
@@ -298,10 +324,11 @@ export const liftSanction = async (id: string, by: string | null, reason: string
           user.blockedAt = null;
           await user.save({ session });
         }
+        // Une suspension prononcée avant le blocage reprend son cours.
         for (const shopId of found.suspendedShopIds) {
           const shop = await Shop.findById(shopId).session(session);
           if (shop && shop.suspendedUntil?.getTime() === FAR_FUTURE.getTime()) {
-            shop.suspendedUntil = null;
+            shop.suspendedUntil = await remainingSuspension(shopId, found._id as Types.ObjectId, now, session);
             await shop.save({ session });
           }
         }
@@ -323,6 +350,19 @@ export const liftSanction = async (id: string, by: string | null, reason: string
   return sanction;
 };
 
+/**
+ * Un masquage provisoire (automatique, après plusieurs signalements) devient
+ * définitif quand l'administration confirme le signalement. La boutique,
+ * qui n'avait pas été prévenue du provisoire, reçoit alors le motif.
+ */
+export const confirmProvisional = async (sanction: ISanction): Promise<ISanction> => {
+  if (!sanction.provisional || sanction.liftedAt) return sanction;
+  sanction.provisional = false;
+  await sanction.save();
+  await noticeFor(sanction, false);
+  return sanction;
+};
+
 /** Une boutique a corrigé son annonce masquée et demande sa remise en ligne. */
 export const requestLift = async (id: string, userId: string, now = new Date()): Promise<ISanction> => {
   const sanction = await Sanction.findById(id);
@@ -341,13 +381,17 @@ export const requestLift = async (id: string, userId: string, now = new Date()):
       subject: `Remise en ligne demandée : ${sanction.target.label}`,
       title: "Une annonce corrigée attend votre validation",
       paragraphs: [sanction.target.label, `Motif du masquage : ${sanction.reason}`],
-      cta: { path: `/admin/support?onglet=sanctions`, label: "Examiner" },
+      cta: { path: "/admin/support", label: "Examiner" },
     });
   }
   return sanction;
 };
 
-/** Mesure en cours : ni levée, ni arrivée à échéance. Un avertissement compte 12 mois. */
+/**
+ * Mesure en cours : ni levée, ni arrivée à échéance. Seule une suspension a
+ * une fin ; un masquage, un avertissement ou un blocage valent jusqu'à leur
+ * levée. Le barème (suggestSanction) ne retient, lui, que les 12 derniers mois.
+ */
 export const isSanctionActive = (sanction: Pick<ISanction, "type" | "liftedAt" | "endsAt">, now = new Date()): boolean => {
   if (sanction.liftedAt) return false;
   if (sanction.type === SanctionType.SUSPENSION) return !!sanction.endsAt && sanction.endsAt > now;

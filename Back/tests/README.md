@@ -42,15 +42,15 @@ tests/
         ├── BaseResponse.test.ts
         ├── middlewares/         # authentification, rôles, erreurs, validation
         ├── forms/               # règles express-validator
-        ├── helpers/             # fileUpload (fs simulé), workflow des sous-commandes, transactions
+        ├── helpers/             # fileUpload (fs simulé), workflows des sous-commandes et du support, transactions
         ├── interfaces/          # mappers DTO et calculs de promotion
         ├── payment/             # choix du prestataire de paiement
-        └── services/            # actions sur les sous-commandes, paiement, délais, avis
+        └── services/            # actions sur les sous-commandes, paiement, délais, avis, support, sanctions
 ```
 
 ## Périmètre couvert
 
-**1 277 tests**.
+**1 760 tests**.
 
 | Domaine | Fichiers testés |
 | --- | --- |
@@ -63,6 +63,7 @@ tests/
 | Fichiers | `fileUpload` (URL publique, suppression, limites de taille) |
 | Contrôleurs | auth, panier, commande, sous-commande, paiement, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, demande de boutique, famille, catégorie, sous-catégorie |
 | Cycle de vie des commandes | règles des actions (`shopOrder.workflow`), effets (`shopOrder.service` : stock, remboursements, statut de la commande), paiement en ligne, délais automatiques, avis par email, migration des commandes existantes |
+| Support et modération | règles des demandes (`support.workflow` : motifs, priorités, délais, actions, messages, barème des sanctions), écritures (`support.service` : ouverture par type de cible, doublons, signalements abusifs, masquage provisoire après 3 signalements, messages, actions, échéances), retour lié à la sous-commande (`support.returns`), avis par email (`support.notifications`), sanctions (`sanction.service` : masquage, avertissement, suspension, blocage avec sessions fermées et commandes annulées, levée, remise en ligne), DTO (`Support.interfaces`), formulaires, contrôleurs support et sanctions, effets de la modération (connexion bloquée, panier et commande refusés, offre masquée, note recalculée sans les avis masqués) |
 
 ## Écrire un nouveau test de contrôleur
 

@@ -15,6 +15,9 @@ import type { IReview } from "../../src/models/review.model.js";
 import type { IAddress } from "../../src/models/address.model.js";
 import type { IPromotion } from "../../src/models/promotion.model.js";
 import type { IShopRequest } from "../../src/models/shopRequest.model.js";
+import type { ISupportTicket } from "../../src/models/supportTicket.model.js";
+import type { ISupportMessage } from "../../src/models/supportMessage.model.js";
+import type { ISanction } from "../../src/models/sanction.model.js";
 import { DeliveryMethod, OrderStatus, PaymentMethod } from "../../src/models/order.model.js";
 import { ShopOrderPaymentStatus, ShopOrderStatus } from "../../src/models/shopOrder.model.js";
 import {
@@ -28,6 +31,14 @@ import {
   SellerType,
   ShopRequestStatus,
 } from "../../src/models/shopRequest.model.js";
+import {
+  SupportParty,
+  SupportPriority,
+  SupportTicketStatus,
+  SupportTicketType,
+} from "../../src/models/supportTicket.model.js";
+import { SupportMessageKind, SupportVisibility } from "../../src/models/supportMessage.model.js";
+import { SanctionTargetKind, SanctionType } from "../../src/models/sanction.model.js";
 
 // ─────────────────────────────────────────────
 //  Utilitaires
@@ -333,3 +344,79 @@ export const makeShopRequest = (over: Over<IShopRequest> = {}): IShopRequest =>
     shopId: null,
     ...over,
   }) as unknown as IShopRequest;
+
+/**
+ * Demande de support : par défaut un problème de commande (retard) ouvert par
+ * un client, qui attend la boutique, sans cible ni échéance. Les champs
+ * absents d'un document neuf valent null, comme les défauts du schéma.
+ */
+export const makeSupportTicket = (over: Over<ISupportTicket> = {}): ISupportTicket =>
+  doc({
+    _id: oid(),
+    number: "SUP-000001",
+    type: SupportTicketType.ORDER_PROBLEM,
+    reason: "delay",
+    subject: "Retard — CMD-1767261600000-123456-1",
+    status: SupportTicketStatus.AWAITING_SHOP,
+    priority: SupportPriority.NORMAL,
+    requester: {
+      userId: oid(),
+      accountType: "user",
+      name: "Mamadou Diallo",
+      email: "mamadou.diallo@example.com",
+    },
+    target: null,
+    boutiqueId: null,
+    requesterShopId: null,
+    orderId: null,
+    assignee: null,
+    escalatedAt: null,
+    shopRespondedAt: null,
+    adminRespondedAt: null,
+    deadlineAt: null,
+    reminderAt: null,
+    proposal: null,
+    resolution: null,
+    appeal: null,
+    resolvedAt: null,
+    closedAt: null,
+    reopenedAt: null,
+    satisfaction: null,
+    lastMessageAt: null,
+    ...over,
+  }) as unknown as ISupportTicket;
+
+/** Message public du demandeur, sans pièce jointe. */
+export const makeSupportMessage = (over: Over<ISupportMessage> = {}): ISupportMessage =>
+  doc({
+    _id: oid(),
+    ticketId: oid(),
+    author: { userId: oid(), party: SupportParty.REQUESTER, name: "Mamadou Diallo" },
+    visibility: SupportVisibility.PUBLIC,
+    kind: SupportMessageKind.MESSAGE,
+    body: "Ma commande n'est toujours pas arrivée.",
+    attachments: [],
+    containsContact: false,
+    ...over,
+  }) as unknown as ISupportMessage;
+
+/** Mesure en cours : par défaut un avertissement adressé à une boutique. */
+export const makeSanction = (over: Over<ISanction> = {}): ISanction =>
+  doc({
+    _id: oid(),
+    type: SanctionType.WARNING,
+    target: { kind: SanctionTargetKind.SHOP, id: oid(), label: "Boutique Kaloum" },
+    notifiedUserId: oid(),
+    reason: "Paiement demandé hors plateforme.",
+    ticketId: null,
+    startsAt: CREATED_AT,
+    endsAt: null,
+    provisional: false,
+    createdBy: null,
+    liftRequestedAt: null,
+    liftedAt: null,
+    liftedBy: null,
+    liftReason: null,
+    suspendedShopIds: [],
+    ...over,
+  }) as unknown as ISanction;

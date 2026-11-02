@@ -336,9 +336,95 @@ Les emails (nouvelle commande, confirmation, expédition avec le code, échec,
 retour, litige, remboursement, rappels) partent après la transaction ; les
 alertes de l'administration vont à `ADMIN_EMAIL`.
 
+## Support et modération
+
+Signalements, litiges et questions passent par des **demandes de support**
+(`SupportTicket`, collection `support_ticket`, numérotées `SUP-000001` par
+`Counter`) et leur fil de messages (`SupportMessage`). Comme pour les
+commandes, rien ne se change à la main : chaque étape est une **action**
+(`shared/helpers/support.workflow.ts`) et `availableActions` dit au lecteur
+quels boutons montrer.
+
+| Type | Ouvert par | Traité par |
+| --- | --- | --- |
+| `order_problem` (retard, non reçu, boutique injoignable, remboursement…) | client, sur une sous-commande, jusqu'à 30 jours après la livraison | la boutique, puis l'administration |
+| `return` | né de l'action `return` de la sous-commande, qu'il suit pas à pas | la boutique, puis l'administration (litige) |
+| `listing_report`, `shop_report`, `review_report` | tout compte | l'administration ; la boutique ne sait pas qui signale |
+| `customer_report` (absences, fraude au code, menaces, retours abusifs) | une boutique, depuis une commande | l'administration |
+| `general_question` | client, boutique, ou visiteur (`POST /support/contact`, réponse par email) | l'administration |
+| `sanction_appeal` | la personne visée par une mesure | un autre membre de l'équipe |
+
+Parcours : `awaiting_shop → awaiting_requester → resolved → closed`, avec
+`awaiting_admin` dès que la boutique ne répond pas, que le client refuse sa
+proposition ou que quelqu'un demande l'arbitrage.
+
+| Action | Qui | Effet |
+| --- | --- | --- |
+| `propose` (nouvelle livraison, remboursement, échange, nouvelle date, explication) | boutique | attend la réponse du client |
+| `accept` | demandeur | résolue (`agreed`) |
+| `escalate` (motif) | demandeur, boutique | l'administration tranche |
+| `resolve` (`upheld`, `rejected`, `answered` + motif) | admin | résolue ; recours possible 7 jours |
+| `appeal` (motif) | demandeur, boutique | réexamen, une fois ; la décision est ensuite définitive |
+| `close`, `reopen` (14 jours, une fois) | demandeur, admin / demandeur | |
+| `assign`, `rate` | admin / demandeur | prise en charge, note de satisfaction |
+
+**Délais** (`runSupportDeadlines`, toutes les 15 minutes, avec le planificateur
+des commandes ; `ORDER_SCHEDULER=off` coupe les deux) :
+
+| Qui | Échéance | Rappel | À l'échéance |
+| --- | --- | --- | --- |
+| boutique | 48 h | 24 h | passe à l'administration |
+| demandeur | 7 jours | 3 jours | fermée (`expired`) |
+| administration | réponse 24 h (4 h si urgente), décision 72 h | 24 h | alerte |
+| après une décision | 7 jours | — | fermée |
+
+Contrefaçon, produit interdit, arnaque, paiement hors plateforme et menaces sont
+**urgents**. Un compte dont 5 signalements ont été rejetés en 30 jours voit les
+suivants passer en priorité basse. Un message qui contient un numéro, un email
+ou « WhatsApp » est envoyé, mais signalé (`containsContact`, `warning` dans la
+réponse) : tout doit se régler sur la plateforme.
+
+### Mesures
+
+`POST /sanctions` (admin) applique une **mesure** (`Sanction`) ; la personne
+visée est prévenue par email avec le motif, et peut la contester.
+
+| Mesure | Cible | Effet |
+| --- | --- | --- |
+| `hide` | annonce, avis | invisible du public (`hiddenAt`) ; la boutique la voit, la corrige et demande sa remise en ligne |
+| `warning` | boutique, compte | aucun effet, compte dans le barème |
+| `suspension` (7, 15 ou 30 jours) | boutique | vitrine visible, panier et checkout refusés (`suspendedUntil`) |
+| `block` | compte | connexion refusée (423), sessions fermées, commandes non expédiées annulées, boutiques du gérant suspendues |
+
+Le barème (`suggestSanction`, sur 12 mois) propose : avertissement, puis 7 jours,
+puis 30 jours de suspension pour une boutique ; avertissement puis blocage pour
+un compte. Lever une mesure ne rouvre jamais une boutique qu'une autre mesure
+tient fermée (autre suspension en cours, gérant bloqué).
+
+**Masquage automatique.** Trois comptes différents qui signalent la même annonce
+pour contrefaçon ou produit interdit en 7 jours la masquent aussitôt, à titre
+provisoire. L'administration confirme (la boutique reçoit alors le motif) ou
+lève le masquage en tranchant le signalement.
+
+### Routes
+
+| Route | Accès |
+| --- | --- |
+| `POST /support/tickets` (multipart, `attachments` : 5 images ou PDF de 5 Mo) | connecté |
+| `POST /support/contact` | public, limité comme les emails |
+| `GET /support/tickets?scope=mine\|shop\|admin&boutiqueId=&tab=&type=&search=&page=` | selon le `scope` — `counts` par onglet |
+| `GET /support/tickets/:id` | les parties ; l'admin reçoit en plus le dossier (demandes liées, mesures, barème) et les notes internes |
+| `POST /support/tickets/:id/messages` (multipart ; `internal`, `waitFor` pour l'admin) | les parties |
+| `PATCH /support/tickets/:id/:action` | selon l'action |
+| `POST /sanctions`, `GET /sanctions?targetKind=&targetId=&pending=true`, `PATCH /sanctions/:id/lift` | admin |
+| `GET /sanctions/mine`, `PATCH /sanctions/:id/request-lift` | la personne visée |
+
+Les emails vont à chaque partie qui n'est pas l'auteur ; ceux de l'équipe à
+`ADMIN_EMAIL`, responsable du support.
+
 ## Tests
 
-1 270+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
+1 760+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
 sessions de transaction, `express-validator`, `fs` et les emails sont simulés.
 
 Voir [tests/README.md](tests/README.md) pour l'organisation et le guide d'ajout.

@@ -239,6 +239,68 @@ describe("getProductBoutiqueById", () => {
     expect(res.body.message).toBe("Produit non trouvé");
   });
 
+  describe("offre masquée par la modération", () => {
+    const ownerId = oid();
+    const shop = makeShop({ ownerId });
+    const hidden = () => makeProductBoutique({ boutiqueId: shop._id, hiddenAt: new Date("2026-10-01T00:00:00.000Z") });
+
+    const read = async (pb: any, user?: { id: string; entityType: string }) => {
+      PbMock.findById.mockReturnValue(mockQuery(pb));
+      ShopMock.findById.mockReturnValue(mockQuery(shop));
+      const res = mockResponse();
+      await getProductBoutiqueById(
+        mockRequest({ params: { id: pb._id.toString() }, ...(user ? { session: mockExpressSession(user) } : {}) }),
+        res
+      );
+      return res;
+    };
+
+    it("n'existe plus pour le public", async () => {
+      const res = await read(hidden());
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.message).toBe("Produit en boutique non trouvé");
+      expect(ProductMock.findById).not.toHaveBeenCalled();
+    });
+
+    it("n'existe plus pour un client connecté, et n'entre pas dans son historique", async () => {
+      const res = await read(hidden(), { id: oid().toString(), entityType: "user" });
+
+      expect(res.statusCode).toBe(404);
+      expect(RecentlyViewedMock.findOne).not.toHaveBeenCalled();
+    });
+
+    it("n'existe plus pour le gérant d'une autre boutique", async () => {
+      const res = await read(hidden(), { id: oid().toString(), entityType: "shop" });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("reste lisible par le gérant de sa boutique, pour la corriger", async () => {
+      const pb = hidden();
+
+      const res = await read(pb, { id: ownerId.toString(), entityType: "shop" });
+
+      expect(ShopMock.findById).toHaveBeenCalledWith(pb.boutiqueId);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it("reste lisible par l'administration", async () => {
+      const res = await read(hidden(), { id: oid().toString(), entityType: "admin" });
+
+      expect(res.statusCode).toBe(200);
+    });
+
+    it("ne lit pas la boutique pour une offre visible", async () => {
+      PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
+
+      await getProductBoutiqueById(mockRequest({ params: { id: oid().toString() } }), mockResponse());
+
+      // La boutique n'est lue qu'une fois, pour la réponse, jamais pour le contrôle de visibilité.
+      expect(ShopMock.findById).toHaveBeenCalledOnce();
+    });
+  });
+
   it("n'enregistre aucune vue hors session", async () => {
     PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
 

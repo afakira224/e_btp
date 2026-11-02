@@ -35,6 +35,7 @@ vi.mock("express-validator", async (importOriginal) => {
 import { validationResult } from "express-validator";
 import { Cart } from "../../../src/models/cart.model.js";
 import { Product, productBoutique } from "../../../src/models/product.model.js";
+import { Shop } from "../../../src/models/boutique.model.js";
 import { User } from "../../../src/models/user.model.js";
 import {
   addToCart,
@@ -50,6 +51,7 @@ import {
   makeCartItem,
   makeProduct,
   makeProductBoutique,
+  makeShop,
   makeUser,
   oid,
 } from "../../helpers/factories.js";
@@ -58,6 +60,9 @@ const CartMock = Cart as unknown as ReturnType<typeof vi.fn> & Record<string, an
 const PbMock = productBoutique as unknown as Record<string, any>;
 const ProductMock = Product as unknown as Record<string, any>;
 const UserMock = User as unknown as Record<string, any>;
+const ShopMock = Shop as unknown as Record<string, any>;
+
+const DAY = 24 * 60 * 60 * 1000;
 
 let session: ReturnType<typeof mockSession>;
 
@@ -83,6 +88,7 @@ beforeEach(() => {
   PbMock.findById.mockReturnValue(mockQuery(null));
   ProductMock.find.mockReturnValue(mockQuery([]));
   UserMock.findById.mockReturnValue(mockQuery(null));
+  ShopMock.findById.mockReturnValue(mockQuery(null));
 });
 
 // ─────────────────────────────────────────────
@@ -220,6 +226,62 @@ describe("addToCart", () => {
 
     expect(res.statusCode).toBe(404);
     expect(res.body.message).toBe("Produit en boutique introuvable");
+  });
+
+  describe("modération", () => {
+    const add = async (pb: any, cart: any) => {
+      const res = mockResponse();
+      await addToCart(
+        mockRequest({ params: { userId: cart.userId.toString() }, body: { productBoutiqueId: pb._id.toString() } }),
+        res
+      );
+      return res;
+    };
+
+    it("refuse une offre masquée par la modération, sans lire sa boutique", async () => {
+      const pb = makeProductBoutique({ stock: 10, hiddenAt: new Date("2026-10-01T00:00:00.000Z") });
+      const cart = makeCart({ items: [] });
+      setup({ pb, cart });
+
+      const res = await add(pb, cart);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe("Ce produit n'est plus en vente.");
+      expect(session.abortTransaction).toHaveBeenCalled();
+      expect(cart.save).not.toHaveBeenCalled();
+      expect(ShopMock.findById).not.toHaveBeenCalled();
+    });
+
+    it("refuse l'offre d'une boutique suspendue", async () => {
+      const shop = makeShop({ nom: "Boutique Kaloum", suspendedUntil: new Date(Date.now() + DAY) });
+      const pb = makeProductBoutique({ stock: 10, boutiqueId: shop._id });
+      const cart = makeCart({ items: [] });
+      setup({ pb, cart });
+      const shopQuery = mockQuery(shop);
+      ShopMock.findById.mockReturnValue(shopQuery);
+
+      const res = await add(pb, cart);
+
+      expect(ShopMock.findById).toHaveBeenCalledWith(pb.boutiqueId);
+      expect(shopQuery.session).toHaveBeenCalledWith(session);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe("Boutique Kaloum n'accepte pas de commande en ce moment.");
+      expect(session.abortTransaction).toHaveBeenCalled();
+      expect(cart.save).not.toHaveBeenCalled();
+    });
+
+    it("accepte de nouveau l'offre une fois la suspension terminée", async () => {
+      const shop = makeShop({ suspendedUntil: new Date(Date.now() - DAY) });
+      const pb = makeProductBoutique({ stock: 10, boutiqueId: shop._id });
+      const cart = makeCart({ items: [] });
+      setup({ pb, cart });
+      ShopMock.findById.mockReturnValue(mockQuery(shop));
+
+      const res = await add(pb, cart);
+
+      expect(res.statusCode).toBe(200);
+      expect(cart.items).toHaveLength(1);
+    });
   });
 
   it("crée un panier quand l'utilisateur n'en a pas encore", async () => {

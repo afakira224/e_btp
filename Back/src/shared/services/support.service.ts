@@ -49,7 +49,7 @@ import {
   supportScheduleFor,
   type SupportActionInput,
 } from "../helpers/support.workflow.js";
-import { applySanction, liftSanction, SANCTION_LABELS } from "./sanction.service.js";
+import { applySanction, confirmProvisional, liftSanction, SANCTION_LABELS } from "./sanction.service.js";
 import {
   deliverSupportNotices,
   eventNotices,
@@ -311,7 +311,7 @@ export const createTicket = async (
   if (!user && !(input.guest && input.type === T.GENERAL_QUESTION)) {
     throw new HttpError("Session absente ou expirée, veuillez vous connecter.", 401);
   }
-  if (!(input.reason in (SUPPORT_REASONS[input.type] ?? {}))) {
+  if (!Object.hasOwn(SUPPORT_REASONS[input.type] ?? {}, input.reason)) {
     throw new HttpError(`Motif invalide. Valeurs acceptées : ${Object.keys(SUPPORT_REASONS[input.type] ?? {}).join(", ")}.`, 400);
   }
   if (input.reason === "other" && input.description.trim().length < 20) {
@@ -624,8 +624,7 @@ export const applySupportAction = async (
       if (effects.liftProvisional) {
         await liftSanction(String(provisional._id), user?.id ?? null, "Signalements non fondés après examen.", now);
       } else {
-        provisional.provisional = false;
-        await provisional.save();
+        await confirmProvisional(provisional);
       }
     }
   }

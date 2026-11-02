@@ -89,8 +89,11 @@ export const SUPPORT_TYPE_LABELS: Record<SupportTicketType, string> = {
   [T.SANCTION_APPEAL]: "Contestation d'une mesure",
 };
 
-export const reasonLabel = (type: SupportTicketType, reason: string): string =>
-  SUPPORT_REASONS[type]?.[reason] ?? reason;
+export const reasonLabel = (type: SupportTicketType, reason: string): string => {
+  const reasons = SUPPORT_REASONS[type];
+  // Object.hasOwn : « toString » ou « constructor » ne sont pas des motifs.
+  return reasons && Object.hasOwn(reasons, reason) ? reasons[reason]! : reason;
+};
 
 /** Types qu'une personne peut ouvrir directement (le retour naît de la sous-commande). */
 export const OPENABLE_TYPES: readonly SupportTicketType[] = [
@@ -304,7 +307,7 @@ export const checkSupportAction = (
       if (ticket.type !== T.ORDER_PROBLEM) return "Une solution se propose sur un problème de commande.";
       if (ticket.escalatedAt) return "L'administration a repris la demande : c'est elle qui tranche.";
       if (ticket.status !== S.AWAITING_SHOP && ticket.status !== S.AWAITING_REQUESTER) return "Cette demande n'attend plus de proposition.";
-      if (!input.kind || !(input.kind in PROPOSAL_KINDS)) {
+      if (!input.kind || !Object.hasOwn(PROPOSAL_KINDS, input.kind)) {
         return `Type de solution invalide. Valeurs acceptées : ${Object.keys(PROPOSAL_KINDS).join(", ")}.`;
       }
       if (!input.details?.trim()) return "Décrivez la solution proposée.";
@@ -360,6 +363,8 @@ export const checkSupportAction = (
       if (!is(REQUESTER)) return "Seul le demandeur rouvre sa demande.";
       if (ticket.status !== S.CLOSED) return "Seule une demande fermée se rouvre.";
       if (ticket.reopenedAt) return "Une demande ne se rouvre qu'une fois.";
+      // Le recours a été réexaminé : sa décision est définitive.
+      if (ticket.appeal) return "Cette demande a fait l'objet d'un recours : la décision est définitive.";
       if (managedByOrder) return "Un retour fermé ne se rouvre pas : ouvrez un problème de commande.";
       if (elapsed(ticket.closedAt, now) > SUPPORT_DEADLINES.reopen) return "Le délai de 14 jours pour rouvrir est dépassé.";
       if (!input.reason?.trim()) return "Dites ce qui ne va toujours pas.";
@@ -447,7 +452,13 @@ const CONTACT_PATTERNS = [
   /whats\s?app/i,
 ];
 
-export const containsContact = (text: string): boolean => CONTACT_PATTERNS.some((pattern) => pattern.test(text));
+/** Une date (2026-10-25, 25.10.2026, 25/10/2026) ressemble à un numéro : on la retire avant de chercher. */
+const DATES = /\b(?:\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{4})\b/g;
+
+export const containsContact = (text: string): boolean => {
+  const withoutDates = text.replace(DATES, " ");
+  return CONTACT_PATTERNS.some((pattern) => pattern.test(withoutDates));
+};
 
 /** Libellé du statut, du point de vue de qui le lit. */
 export const statusLabelFor = (status: SupportTicketStatus, viewer: SupportParty): string => {

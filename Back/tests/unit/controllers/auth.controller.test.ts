@@ -342,6 +342,59 @@ describe("login", () => {
     expect(res.body.message).toBe("Email non vérifié.");
   });
 
+  describe("compte bloqué par la modération", () => {
+    const blockedAt = new Date("2026-10-01T00:00:00.000Z");
+
+    it("renvoie 423 sans ouvrir de session, même avec le bon mot de passe", async () => {
+      setup({ user: makeUser({ isEmailVerified: true, blockedAt }) });
+      const req = mockRequest({ body: credentials });
+      const res = mockResponse();
+
+      await login(req, res);
+
+      expect(res.statusCode).toBe(423);
+      expect(res.body).toMatchObject({
+        success: false,
+        message: "Ce compte est bloqué. Contactez le support si vous pensez à une erreur.",
+        data: null,
+      });
+      expect(regenerateSession).not.toHaveBeenCalled();
+      expect(req.session.user).toBeUndefined();
+    });
+
+    it("signale le blocage avant l'email non vérifié", async () => {
+      setup({ user: makeUser({ isEmailVerified: false, blockedAt }) });
+      const res = mockResponse();
+
+      await login(mockRequest({ body: credentials }), res);
+
+      expect(res.statusCode).toBe(423);
+    });
+
+    it("ne révèle pas le blocage à qui n'a pas le bon mot de passe", async () => {
+      setup({
+        user: makeUser({ isEmailVerified: true, blockedAt }),
+        login: makeLogin({ comparePassword: vi.fn().mockResolvedValue(false) }),
+      });
+      const res = mockResponse();
+
+      await login(mockRequest({ body: credentials }), res);
+
+      expect(res.statusCode).toBe(401);
+      expect(res.body.message).toBe("Identifiants invalides.");
+    });
+
+    it("laisse se connecter un compte débloqué", async () => {
+      setup({ user: makeUser({ isEmailVerified: true, blockedAt: null }) });
+      const res = mockResponse();
+
+      await login(mockRequest({ body: credentials }), res);
+
+      expect(res.body.success).toBe(true);
+      expect(regenerateSession).toHaveBeenCalledOnce();
+    });
+  });
+
   it("n'ouvre aucune session quand la connexion échoue", async () => {
     setup({ user: null });
     const req = mockRequest({ body: credentials });
