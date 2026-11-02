@@ -145,6 +145,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Bloqué par la modération : le mot de passe est juste, mais l'accès est
+    // refusé. 423 et non 403, réservé à l'email non vérifié.
+    if (user.blockedAt) {
+      logger.warn(`Connexion refusée — compte bloqué : ${email}`);
+      res
+        .status(423)
+        .json(new BaseResponse(false, "Ce compte est bloqué. Contactez le support si vous pensez à une erreur.", 423, null));
+      return;
+    }
+
     if (!user.isEmailVerified) {
       logger.warn(`Connexion refusée — email non vérifié : ${email}`);
       res.status(403).json(BaseResponse.Forbidden("Email non vérifié."));

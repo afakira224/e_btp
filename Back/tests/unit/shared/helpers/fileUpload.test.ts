@@ -232,11 +232,22 @@ describe("validateUploadedFileSize", () => {
   // retombe sur la limite video de 100 Mo. Le test documente cette tolerance.
   it("applique la limite vidéo à un type inconnu qui aurait franchi le filtre", () => {
     const req = mockRequest();
-    (req as any).files = [makeFile({ mimetype: "application/pdf", size: 6 * 1024 * 1024 })];
+    (req as any).files = [makeFile({ mimetype: "application/zip", size: 6 * 1024 * 1024 })];
     const n = next();
 
     validateUploadedFileSize(req, mockResponse(), n);
 
     expect(n).toHaveBeenCalledOnce();
+  });
+
+  it("limite un PDF joint à une demande de support à 5 Mo, comme une image", () => {
+    const req = mockRequest();
+    (req as any).files = [makeFile({ originalname: "facture.pdf", mimetype: "application/pdf", size: 6 * 1024 * 1024 })];
+    const res = mockResponse();
+
+    validateUploadedFileSize(req, res, next());
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toContain("5MB");
   });
 });

@@ -10,6 +10,7 @@ import mongoose from "mongoose";
 import { swaggerSpec } from "./shared/swagger/swagger.config.js";
 import { DB_CONNECT } from "./db/db.js";
 import { startOrderScheduler } from "./shared/services/orderDeadlines.service.js";
+import { startSupportScheduler } from "./shared/services/support.service.js";
 import mainRouter from "./routers/router.router.js";
 import logger from "./shared/logger/logger.js";
 import { errorHandler, notFoundHandler } from "./shared/middlewares/error.middleware.js";
@@ -103,9 +104,13 @@ app.use(errorHandler);
 const start = async (): Promise<void> => {
   await DB_CONNECT();
 
-  // Délais des commandes (paiements non confirmés, expirations, clôtures) :
-  // ORDER_SCHEDULER=off le coupe, par exemple sur une seconde instance.
-  if (process.env.ORDER_SCHEDULER !== "off") startOrderScheduler();
+  // Délais des commandes (paiements non confirmés, expirations, clôtures) et
+  // du support (rappels, escalades, fermetures) : ORDER_SCHEDULER=off coupe
+  // les deux, par exemple sur une seconde instance.
+  if (process.env.ORDER_SCHEDULER !== "off") {
+    startOrderScheduler();
+    startSupportScheduler();
+  }
 
   const server = app.listen(PORT, () => {
     logger.info(`Serveur démarré sur le port ${PORT}`);

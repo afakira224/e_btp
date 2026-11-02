@@ -204,7 +204,7 @@ class Vitrine {
         const ids = await this.produitsDuRayon(sous);
         if (ids.length === 0) return [];
         const offres = await productBoutique
-          .find({ productId: { $in: ids }, stock: { $gt: 0 }, _id: { $nin: ecartees }, ...options.filtre })
+          .find({ productId: { $in: ids }, stock: { $gt: 0 }, _id: { $nin: ecartees }, hiddenAt: null, ...options.filtre })
           .sort(options.tri ?? { isFeatured: -1, reviewsCount: -1 })
           .limit(parRayon);
         return offres.map((offre) => ({ sous, offre }));
@@ -218,7 +218,7 @@ class Vitrine {
     const ecartees = new Set([...this.exclues, ...this.montrees]);
     const voulues = ids.filter((id) => !ecartees.has(id));
     if (voulues.length === 0) return [];
-    const offres = await productBoutique.find({ _id: { $in: voulues.map(oid) }, stock: { $gt: 0 } });
+    const offres = await productBoutique.find({ _id: { $in: voulues.map(oid) }, stock: { $gt: 0 }, hiddenAt: null });
     const parId = new Map(offres.map((o) => [String(o._id), o]));
     return this.marquer(voulues.flatMap((id) => parId.get(id) ?? []).slice(0, limite));
   }

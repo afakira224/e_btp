@@ -12,6 +12,8 @@ export interface IReview extends Document, BaseModel {
   rating: number;
   comment?: string;
   verifiedPurchase: boolean;
+  /** Masqué par la modération : hors de la liste publique et de la note. */
+  hiddenAt?: Date | null;
 }
 
 const reviewSchema = new Schema<IReview>(
@@ -21,6 +23,7 @@ const reviewSchema = new Schema<IReview>(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, trim: true, maxlength: 2000 },
     verifiedPurchase: { type: Boolean, default: false },
+    hiddenAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true }

@@ -23,6 +23,7 @@ import { Cart } from "../models/cart.model.js";
 import { Address } from "../models/address.model.js";
 import { Product, productBoutique } from "../models/product.model.js";
 import { Shop } from "../models/boutique.model.js";
+import { isShopSuspended } from "../shared/helpers/moderation.helper.js";
 import { Famille } from "../models/famille.model.js";
 import { Categorie } from "../models/categorie.model.js";
 import { SousCategorie } from "../models/sousCategorie.model.js";
@@ -181,12 +182,30 @@ export const createOrder = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Modération : une offre masquée n'est plus en vente.
+    const hidden = productBoutiques.find(pb => pb.hiddenAt);
+    if (hidden) {
+      await session.abortTransaction();
+      const response = BaseResponse.BadRequest("Un produit du panier a été retiré de la vente : retirez-le pour commander.");
+      return res.status(response.statusCode).json(response);
+    }
+
     // ── Livraisons : une par boutique ───────────────────────
     // Les réglages sont lus dans la transaction : la commande fige ceux en
     // vigueur à cet instant.
     const shops = await Shop.find({
       _id: { $in: [...new Set(productBoutiques.map(pb => pb.boutiqueId.toString()))] },
     }).session(session);
+
+    // Une boutique suspendue ne prend plus de nouvelle commande.
+    const suspended = shops.find(shop => isShopSuspended(shop));
+    if (suspended) {
+      await session.abortTransaction();
+      const response = BaseResponse.BadRequest(
+        `${suspended.nom} n'accepte pas de commande en ce moment : retirez ses articles pour commander.`
+      );
+      return res.status(response.statusCode).json(response);
+    }
 
     const quote = quoteDelivery(
       cart.items.map(item => {

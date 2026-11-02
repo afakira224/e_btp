@@ -2,6 +2,7 @@ import mongoose, { type ClientSession, type Types } from "mongoose";
 import { Order, OrderStatus, PaymentMethod, type IOrder, type IOrderItem } from "../../models/order.model.js";
 import {
   SHOP_ORDER_NEGATIVE_END,
+  SHOP_ORDER_TERMINAL,
   ShopOrder,
   ShopOrderActor,
   ShopOrderPaymentStatus,
@@ -13,6 +14,7 @@ import { Promotion } from "../../models/promotion.model.js";
 import logger from "../logger/logger.js";
 import { HttpError } from "../middlewares/error.middleware.js";
 import { getPaymentProvider } from "../payment/payment.provider.js";
+import { syncReturnTicket } from "./support.returns.js";
 import {
   ACTION_RULES,
   checkAction,
@@ -117,6 +119,16 @@ export const syncOrderStatus = async (
 /** Motif du dernier échec de livraison : il dit si le client en est la cause. */
 const lastDeliveryFailureReason = (part: Pick<IShopOrder, "statusHistory">): string | undefined =>
   [...(part.statusHistory ?? [])].reverse().find((entry) => entry.status === ShopOrderStatus.DELIVERY_FAILED)?.reason;
+
+/** Actions de la sous-commande qui font avancer la demande de retour liée. */
+const RETURN_TICKET_ACTIONS: readonly ShopOrderAction[] = [
+  ShopOrderAction.REQUEST_RETURN,
+  ShopOrderAction.ACCEPT_RETURN,
+  ShopOrderAction.REJECT_RETURN,
+  ShopOrderAction.ESCALATE,
+  ShopOrderAction.RESOLVE_DISPUTE,
+  ShopOrderAction.CONFIRM_REFUND,
+];
 
 const DEFAULT_NOTES: Partial<Record<ShopOrderAction, string>> = {
   [ShopOrderAction.ESCALATE]: "La boutique n'a pas répondu au retour sous 48 heures.",
@@ -254,6 +266,10 @@ export const applyShopOrderAction = async ({
 
   await part.save({ session });
   const order = await syncOrderStatus(part.orderId, [part], session, now, userId);
+  // Un retour a sa demande de support : elle suit chaque étape de la sous-commande.
+  if (RETURN_TICKET_ACTIONS.includes(action) || (part.return && SHOP_ORDER_TERMINAL.includes(part.status))) {
+    await syncReturnTicket({ part, action, input, now, session, userId });
+  }
 
   return { part, order, from, refund, refundViaProvider };
 };

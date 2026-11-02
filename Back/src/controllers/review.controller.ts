@@ -8,23 +8,7 @@ import { Order, ORDER_STATUSES_WITHOUT_SALE } from "../models/order.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { toReviewResponseDto, type ReviewSummaryDto } from "../shared/interfaces/Review.interfaces.js";
-
-// Recalcule la note moyenne et le nombre d'avis du product_boutique à partir des avis actifs.
-const recomputeRating = async (
-  productBoutiqueId: mongoose.Types.ObjectId | string,
-  session: mongoose.ClientSession
-): Promise<void> => {
-  const reviews = await Review.find({ productBoutiqueId }).session(session);
-  const count = reviews.length;
-  const average = count ? reviews.reduce((sum, r) => sum + r.rating, 0) / count : 0;
-
-  const pb = await productBoutique.findById(productBoutiqueId).session(session);
-  if (pb) {
-    pb.rating = Math.round(average * 10) / 10; // 1 décimale
-    pb.reviewsCount = count;
-    await pb.save({ session });
-  }
-};
+import { recomputeRating, VISIBLE_REVIEW } from "../shared/helpers/review.helper.js";
 
 // ─────────────────────────────────────────────
 //  POST /reviews  { userId, productBoutiqueId, rating, comment? }
@@ -110,7 +94,7 @@ export const getReviews = async (req: Request, res: Response) => {
   try {
     const { productBoutiqueId, userId, page = "1", limit = "10" } = req.query;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { ...VISIBLE_REVIEW };
     if (productBoutiqueId) filter.productBoutiqueId = productBoutiqueId;
     if (userId) filter.userId = userId;
 
@@ -298,7 +282,7 @@ export const getReviewSummary = async (req: Request, res: Response) => {
 
     const productBoutiqueId = String(req.params.productBoutiqueId);
 
-    const reviews = await Review.find({ productBoutiqueId });
+    const reviews = await Review.find({ productBoutiqueId, ...VISIBLE_REVIEW });
 
     const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     let sum = 0;

@@ -11,6 +11,10 @@ import { Complementarite } from "../models/complementarite.model.js";
 import { Famille } from "../models/famille.model.js";
 import { Order } from "../models/order.model.js";
 import { ShopOrder } from "../models/shopOrder.model.js";
+import { SupportTicket } from "../models/supportTicket.model.js";
+import { SupportMessage } from "../models/supportMessage.model.js";
+import { Sanction } from "../models/sanction.model.js";
+import { Counter } from "../models/counter.model.js";
 import { migrateLegacyOrders } from "../migrations/shopOrders.migration.js";
 import { Product, productBoutique } from "../models/product.model.js";
 import { Promotion } from "../models/promotion.model.js";
@@ -141,6 +145,8 @@ async function main() {
   if (reset) {
     for (const [, model] of plan) await model.collection.deleteMany({});
     await ShopOrder.collection.deleteMany({});
+    // Le support part de zéro, numérotation comprise.
+    for (const model of [SupportTicket, SupportMessage, Sanction, Counter]) await model.collection.deleteMany({});
     // Les sessions ouvertes pointent vers des comptes supprimés.
     await mongoose.connection.collection("sessions").deleteMany({});
     console.log("Collections du seed vidées.");

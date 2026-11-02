@@ -84,7 +84,8 @@ for (const r of rayons) {
   for (let i = 0; i < 3; i++) {
     const p = { _id: oid(), sousCategoryId: r._id, categoryId: r.categorieId, familleId: r.categorie.familleId };
     products.push(p);
-    offers.push({ _id: oid(), productId: p._id, stock: 10, price: 100, discountPrice: i === 0 ? 80 : null, reviewsCount: i, createdAt: new Date() });
+    // hiddenAt: null comme la valeur par défaut du schéma (offre non masquée).
+    offers.push({ _id: oid(), productId: p._id, stock: 10, price: 100, discountPrice: i === 0 ? 80 : null, reviewsCount: i, hiddenAt: null, createdAt: new Date() });
   }
 }
 const offresDe = (r: (typeof rayons)[number]) =>

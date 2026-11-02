@@ -72,6 +72,21 @@ export const getProductBoutiques = async (req: Request, res: Response) => {
     if (productId) filter.productId = productId;
     if (isFeatured !== undefined) filter.isFeatured = isFeatured === "true";
 
+    // Le filtre par boutique n'a de sens que si la boutique existe. Son
+    // gérant (et l'administration) voit aussi les offres masquées par la
+    // modération, pour les corriger ; le public, jamais.
+    if (boutiqueId) {
+      const shop = await Shop.findById(boutiqueId);
+      if (!shop) {
+        logger.warn(`Boutique introuvable : ${String(boutiqueId)}`);
+        const response = BaseResponse.NotFound("Boutique introuvable");
+        return res.status(response.statusCode).json(response);
+      }
+      if (!canManageShop(req.session?.user, shop)) filter.hiddenAt = null;
+    } else {
+      filter.hiddenAt = null;
+    }
+
     const pageNum = Math.max(1, parseInt(page as string));
     const limitNum = Math.max(1, Math.min(100, parseInt(limit as string)));
     const skip = (pageNum - 1) * limitNum;
@@ -80,16 +95,6 @@ export const getProductBoutiques = async (req: Request, res: Response) => {
       productBoutique.find(filter).skip(skip).limit(limitNum).sort({ createdAt: -1 }),
       productBoutique.countDocuments(filter),
     ]);
-
-    // Le filtre par boutique n'a de sens que si la boutique existe.
-    if (boutiqueId) {
-      const shop = await Shop.findById(boutiqueId);
-      if (!shop) {
-        logger.warn(`Boutique introuvable : ${String(boutiqueId)}`);
-        const response = BaseResponse.NotFound("Boutique introuvable");
-        return res.status(response.statusCode).json(response);
-      }
-    }
 
     // Sans filtre, les résultats peuvent provenir de plusieurs boutiques : on les résout toutes.
     const shopIds = [...new Set(items.map(i => i.boutiqueId?.toString()).filter(Boolean))];
@@ -141,7 +146,11 @@ export const getProductBoutiqueById = async (req: Request, res: Response) => {
     const id = String(req.params.id);
 
     const item = await productBoutique.findById(id);
-    if (!item) {
+    // Une offre masquée par la modération n'existe plus pour le public ; sa
+    // boutique et l'administration la lisent encore pour la corriger.
+    const owner = item?.hiddenAt ? await Shop.findById(item.boutiqueId) : null;
+    const hiddenFromViewer = !!item?.hiddenAt && !(owner && canManageShop(req.session?.user, owner));
+    if (!item || hiddenFromViewer) {
       logger.warn(`Produit en boutique introuvable : ${id}`);
       const response = BaseResponse.NotFound("Produit en boutique non trouvé");
       return res.status(response.statusCode).json(response);
@@ -501,7 +510,7 @@ export const getRecentlyViewed = async (req: Request, res: Response) => {
     }
 
     const pbIds = rv.items.map(i => i.productBoutiqueId);
-    const items = await productBoutique.find({ _id: { $in: pbIds } });
+    const items = await productBoutique.find({ _id: { $in: pbIds }, hiddenAt: null });
     const dtos = await enrichProductBoutiques(items);
 
     // On respecte l'ordre de l'historique (plus récent en tête) et on joint viewedAt.
@@ -566,7 +575,7 @@ export const getSuggestions = async (req: Request, res: Response) => {
       const relatedIds = related.map((p) => p._id as mongoose.Types.ObjectId);
       seenProducts.push(...relatedIds);
       const offers = await productBoutique
-        .find({ productId: { $in: relatedIds }, _id: { $ne: item._id } })
+        .find({ productId: { $in: relatedIds }, _id: { $ne: item._id }, hiddenAt: null })
         .limit(missing);
       ranked.push(...offers);
     }
@@ -638,7 +647,8 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
     }
 
     // ── Étape 2 : filtre au niveau ProductBoutique (prix, note, stock, tags…).
-    const pbFilter: Record<string, unknown> = {};
+    // Les offres masquées par la modération ne sortent dans aucune recherche.
+    const pbFilter: Record<string, unknown> = { hiddenAt: null };
     if (productIds) pbFilter.productId = { $in: productIds };
     if (boutiqueId) pbFilter.boutiqueId = boutiqueId;
 
@@ -671,11 +681,12 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
     };
     const sortSpec = sortMap[sort ?? "newest"] ?? { createdAt: -1 };
 
-    // Sans aucun filtre, le total vient des métadonnées de la collection :
-    // compter des millions d'offres une à une prendrait plusieurs secondes.
+    // Sans aucun filtre (hors masquage), le total vient des métadonnées de la
+    // collection : compter des millions d'offres une à une prendrait plusieurs
+    // secondes. Les quelques offres masquées n'y changent rien de visible.
     const [items, total] = await Promise.all([
       productBoutique.find(pbFilter).sort(sortSpec).skip(skip).limit(limitNum),
-      Object.keys(pbFilter).length === 0
+      Object.keys(pbFilter).length === 1
         ? productBoutique.estimatedDocumentCount()
         : productBoutique.countDocuments(pbFilter),
     ]);

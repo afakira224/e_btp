@@ -10,6 +10,8 @@ export interface IShop extends Document {
   email?:      string;
   adresse?:    string;
   delivery:    IShopDelivery;
+  /** Suspendue par la modération jusqu'à cette date : plus de nouvelle commande. */
+  suspendedUntil?: Date | null;
   deletedAt?:  Date | null;
   createdAt:   Date;
   updatedAt:   Date;
@@ -28,6 +30,7 @@ const shopSchema = new Schema<IShop>(
     // Une boutique antérieure à cette option reçoit les réglages par défaut
     // à la lecture (voir DEFAULT_SHOP_MODES).
     delivery:    { type: shopDeliverySchema, default: () => ({}) },
+    suspendedUntil: { type: Date, default: null },
     deletedAt:   { type: Date, default: null },
   },
   { timestamps: true }

@@ -4,6 +4,8 @@ import { validationResult } from "express-validator";
 import { Cart, type ICart } from "../models/cart.model.js";
 import { Product, productBoutique } from "../models/product.model.js";
 import { User } from "../models/user.model.js";
+import { Shop } from "../models/boutique.model.js";
+import { isShopSuspended } from "../shared/helpers/moderation.helper.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { toCartResponseDto } from "../shared/interfaces/Cart.interfaces.js";
@@ -99,6 +101,20 @@ export const addToCart = async (req: Request, res: Response) => {
       await session.abortTransaction();
       logger.warn(`Produit en boutique introuvable : ${productBoutiqueId}`);
       const response = BaseResponse.NotFound("Produit en boutique introuvable");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Modération : une offre masquée n'est plus en vente, une boutique
+    // suspendue ne prend plus de commande.
+    if (pb.hiddenAt) {
+      await session.abortTransaction();
+      const response = BaseResponse.BadRequest("Ce produit n'est plus en vente.");
+      return res.status(response.statusCode).json(response);
+    }
+    const seller = await Shop.findById(pb.boutiqueId).session(session);
+    if (seller && isShopSuspended(seller)) {
+      await session.abortTransaction();
+      const response = BaseResponse.BadRequest(`${seller.nom} n'accepte pas de commande en ce moment.`);
       return res.status(response.statusCode).json(response);
     }
 

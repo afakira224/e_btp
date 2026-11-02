@@ -9,16 +9,19 @@ const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
 // Types MIME autorisés
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/mpeg", "video/quicktime", "video/webm"];
+// Justificatifs joints à une demande de support (facture, bon de livraison).
+const ALLOWED_DOCUMENT_TYPES = ["application/pdf"];
 
 // Limites de taille (en octets)
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100 MB
 
-type FileKind = "images" | "videos";
+type FileKind = "images" | "videos" | "documents";
 
 function getFileKind(mimetype: string): FileKind | null {
     if (ALLOWED_IMAGE_TYPES.includes(mimetype)) return "images";
     if (ALLOWED_VIDEO_TYPES.includes(mimetype)) return "videos";
+    if (ALLOWED_DOCUMENT_TYPES.includes(mimetype)) return "documents";
     return null;
 }
 
@@ -59,11 +62,21 @@ cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
 },
 });
 
-// Filtre de validation des fichiers
+// Filtre de validation des fichiers : images et vidéos (catalogue, logos).
+// Un PDF n'a rien à faire parmi les photos d'un produit.
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
 const kind = getFileKind(file.mimetype);
-if (!kind) {
+if (!kind || kind === "documents") {
 return cb(new Error(`Type de fichier non autorisé: ${file.mimetype}`));
+}
+cb(null, true);
+};
+
+// Pièces jointes du support : photos et PDF, pas de vidéo.
+const attachmentFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const kind = getFileKind(file.mimetype);
+if (kind !== "images" && kind !== "documents") {
+return cb(new Error(`Pièce jointe non autorisée : ${file.mimetype}. Photos (JPEG, PNG, WebP) ou PDF.`));
 }
 cb(null, true);
 };
@@ -77,20 +90,29 @@ fileSize: MAX_VIDEO_SIZE, // limite max globale, vérification fine après uploa
 },
 });
 
+// Pièces jointes d'une demande de support : 5 Mo chacune, vérifié après coup.
+export const uploadAttachments = multer({
+storage,
+fileFilter: attachmentFilter,
+limits: { fileSize: MAX_IMAGE_SIZE },
+});
+
 // Middleware de vérification post-upload (taille selon le type réel)
 export function validateUploadedFileSize(req: Request, res: any, next: any) {
 const files = (req.files as Express.Multer.File[]) || (req.file ? [req.file] : []);
 
 for (const file of files) {
 const kind = getFileKind(file.mimetype);
-const maxSize = kind === "images" ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
+// Une image ou un document : 5 Mo ; une vidéo : 100 Mo.
+const small = kind === "images" || kind === "documents";
+const maxSize = small ? MAX_IMAGE_SIZE : MAX_VIDEO_SIZE;
 
 if (file.size > maxSize) {
 fs.unlink(file.path, () => {});
 return res.status(400).json({
 success: false,
 message: `Le fichier "${file.originalname}" dépasse la taille maximale autorisée (${
-kind === "images" ? "5MB" : "100MB"
+small ? "5MB" : "100MB"
 })`,
 });
 }

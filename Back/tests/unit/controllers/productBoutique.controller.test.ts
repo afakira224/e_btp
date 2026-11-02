@@ -150,13 +150,14 @@ describe("getProductBoutiques", () => {
 
     await getProductBoutiques(mockRequest({ query: { boutiqueId, productId } }), mockResponse());
 
-    expect(PbMock.find).toHaveBeenCalledWith({ boutiqueId, productId });
+    // Le public ne voit jamais une offre masquée par la modération.
+    expect(PbMock.find).toHaveBeenCalledWith({ boutiqueId, productId, hiddenAt: null });
   });
 
   it("filtre sur isFeatured", async () => {
     await getProductBoutiques(mockRequest({ query: { isFeatured: "true" } }), mockResponse());
 
-    expect(PbMock.find).toHaveBeenCalledWith({ isFeatured: true });
+    expect(PbMock.find).toHaveBeenCalledWith({ isFeatured: true, hiddenAt: null });
   });
 
   it("pagine avec les valeurs par défaut", async () => {
@@ -815,6 +816,7 @@ describe("searchProductBoutiques", () => {
     await searchProductBoutiques(mockRequest({ query: { discounted: "true" } }), mockResponse());
 
     expect(PbMock.countDocuments).toHaveBeenCalledWith({
+      hiddenAt: null,
       discountPrice: { $ne: null },
       $expr: { $lt: ["$discountPrice", "$price"] },
     });
@@ -823,7 +825,7 @@ describe("searchProductBoutiques", () => {
   it("avec un filtre, compte exactement les résultats", async () => {
     await searchProductBoutiques(mockRequest({ query: { inStock: "true" } }), mockResponse());
 
-    expect(PbMock.countDocuments).toHaveBeenCalledWith({ stock: { $gt: 0 } });
+    expect(PbMock.countDocuments).toHaveBeenCalledWith({ hiddenAt: null, stock: { $gt: 0 } });
   });
 
   it("plafonne la taille de page à 100", async () => {

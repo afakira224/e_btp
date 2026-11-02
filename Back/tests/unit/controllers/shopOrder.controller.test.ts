@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import mongoose from "mongoose";
 
 // Seuls les modèles Mongoose sont simulés : enums et constantes restent réels.
+// La demande de support liée à un retour a ses propres tests.
+vi.mock("../../../src/shared/services/support.returns.js", () => ({
+  syncReturnTicket: vi.fn(async () => null),
+}));
+
 vi.mock("../../../src/models/shopOrder.model.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/models/shopOrder.model.js")>();
   const { mockModel } = await import("../../helpers/model.mock.js");

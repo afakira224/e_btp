@@ -245,13 +245,14 @@ describe("getReviews", () => {
 
     await getReviews(mockRequest({ query: { productBoutiqueId, userId } }), mockResponse());
 
-    expect(ReviewMock.find).toHaveBeenCalledWith({ productBoutiqueId, userId });
+    // Un avis masqué par la modération ne sort jamais.
+    expect(ReviewMock.find).toHaveBeenCalledWith({ hiddenAt: null, productBoutiqueId, userId });
   });
 
-  it("n'applique aucun filtre quand la requête est vide", async () => {
+  it("sans filtre de requête, n'écarte que les avis masqués", async () => {
     await getReviews(mockRequest(), mockResponse());
 
-    expect(ReviewMock.find).toHaveBeenCalledWith({});
+    expect(ReviewMock.find).toHaveBeenCalledWith({ hiddenAt: null });
   });
 
   it("associe chaque avis à son auteur et calcule le nombre de pages", async () => {

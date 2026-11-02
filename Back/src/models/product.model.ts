@@ -53,7 +53,10 @@ export interface IProductBoutique extends Document , BaseModel{
     tags:string[],
     rating?:number,
     reviewsCount?:number,
-    delivery:IProductDelivery
+    delivery:IProductDelivery,
+    /** Masquée par la modération : hors du catalogue, de la recherche et du panier. */
+    hiddenAt?: Date | null,
+    hiddenReason?: string | null
 }
 
 const productBoutiqeShema = new Schema<IProductBoutique>({
@@ -71,6 +74,8 @@ const productBoutiqeShema = new Schema<IProductBoutique>({
     // Par défaut, l'offre suit les réglages de livraison de sa boutique ;
     // les offres antérieures à cette option héritent donc sans migration.
     delivery: { type: productDeliverySchema, default: () => ({}) },
+    hiddenAt: { type: Date, default: null },
+    hiddenReason: { type: String, default: null },
     deletedAt:   { type: Date, default: null },
 },{timestamps:true})
 

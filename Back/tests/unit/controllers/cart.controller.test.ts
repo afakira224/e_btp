@@ -13,6 +13,12 @@ vi.mock("../../../src/models/product.model.js", async () => {
   return { Product: mockModel(), productBoutique: mockModel() };
 });
 
+// La boutique de l'offre : suspendue ou non (modération).
+vi.mock("../../../src/models/boutique.model.js", async () => {
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { Shop: mockModel() };
+});
+
 vi.mock("../../../src/models/user.model.js", async () => {
   const { mockModel } = await import("../../helpers/model.mock.js");
   return { User: mockModel() };

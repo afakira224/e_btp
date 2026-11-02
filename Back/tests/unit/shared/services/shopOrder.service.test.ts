@@ -26,11 +26,17 @@ vi.mock("../../../../src/models/promotion.model.js", async (importOriginal) => {
 });
 
 // Le prestataire de paiement est choisi par chaque test.
+// La demande de support liée à un retour a ses propres tests.
+vi.mock("../../../../src/shared/services/support.returns.js", () => ({
+  syncReturnTicket: vi.fn(async () => null),
+}));
+
 vi.mock("../../../../src/shared/payment/payment.provider.js", () => ({
   getPaymentProvider: vi.fn(() => null),
 }));
 
 import { DeliveryMethod } from "../../../../src/models/delivery.model.js";
+import { syncReturnTicket } from "../../../../src/shared/services/support.returns.js";
 import { Order, OrderStatus, PaymentMethod } from "../../../../src/models/order.model.js";
 import {
   ShopOrder,
@@ -775,5 +781,25 @@ describe("settleProviderRefund", () => {
     expect(part.payment.status).toBe(ShopOrderPaymentStatus.REFUND_PENDING);
     expect(part.save).not.toHaveBeenCalled();
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(expect.stringContaining("timeout"));
+  });
+});
+
+describe("applyShopOrderAction — demande de support liée au retour", () => {
+  it("une demande de retour ouvre sa demande de support, dans la même transaction", async () => {
+    const { part } = withOneItem({ status: S.DELIVERED, deadlineAt: new Date(Date.now() + 86_400_000) });
+
+    await run(part, ShopOrderAction.REQUEST_RETURN, [CLIENT], { reason: "incomplete", note: "Il manque une bobine." });
+
+    expect(syncReturnTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ part, action: ShopOrderAction.REQUEST_RETURN, session: expect.anything() })
+    );
+  });
+
+  it("une action sans rapport avec un retour ne touche pas au support", async () => {
+    const { part } = withOneItem({ status: S.PENDING });
+
+    await run(part, ShopOrderAction.CONFIRM, [SHOP], {});
+
+    expect(syncReturnTicket).not.toHaveBeenCalled();
   });
 });

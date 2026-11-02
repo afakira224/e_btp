@@ -15,6 +15,8 @@ export interface IUser extends Document {
   isEmailVerified: boolean;
   /** Projet déclaré à l'inscription ou dans le profil ; null s'il n'a rien dit. */
   projet?: IProjet | null;
+  /** Bloqué par la modération : connexion refusée. */
+  blockedAt?: Date | null;
 }
 
 // ─────────────────────────────────────────────
@@ -37,6 +39,7 @@ const userSchema = new Schema<IUser>(
     role:      { type: String, enum: Object.values(EntityType), default: EntityType.USER },
     isEmailVerified: { type: Boolean, default: false },
     projet:    { type: projetSchema, default: null },
+    blockedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

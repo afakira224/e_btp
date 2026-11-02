@@ -67,6 +67,9 @@ export interface ProductBoutiqueResponseDto {
    */
   delivery?: EffectiveDeliveryDto | undefined;
 
+  /** Présent seulement quand la modération a masqué l'offre (lu par sa boutique). */
+  hidden?: { at: Date; reason?: string | undefined } | undefined;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -101,6 +104,9 @@ export const toProductBoutiqueResponseDto = (
   rating: productBoutique.rating,
   reviewsCount: productBoutique.reviewsCount,
   delivery: boutique ? toEffectiveDeliveryDto(productBoutique, boutique) : undefined,
+  ...(productBoutique.hiddenAt
+    ? { hidden: { at: productBoutique.hiddenAt, reason: productBoutique.hiddenReason ?? undefined } }
+    : {}),
   createdAt: productBoutique.createdAt,
   updatedAt: productBoutique.updatedAt,
 });

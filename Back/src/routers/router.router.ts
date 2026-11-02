@@ -16,6 +16,8 @@ import recommandationRouter from './router/recommandation.route.js';
 import shopRequestRouter from './router/shopRequest.route.js';
 import shopOrderRouter from './router/shopOrder.route.js';
 import paymentRouter from './router/payment.route.js';
+import supportRouter from './router/support.route.js';
+import sanctionRouter from './router/sanction.route.js';
 
 const mainRouter = express.Router();
 
@@ -32,6 +34,8 @@ mainRouter.use('/cart', cartRouter);
 mainRouter.use('/orders', orderRouter);
 mainRouter.use('/shop-orders', shopOrderRouter);
 mainRouter.use('/payments', paymentRouter);
+mainRouter.use('/support', supportRouter);
+mainRouter.use('/sanctions', sanctionRouter);
 mainRouter.use('/promotions', promotionRouter);
 mainRouter.use('/wishlist', wishlistRouter);
 mainRouter.use('/reviews', reviewRouter);

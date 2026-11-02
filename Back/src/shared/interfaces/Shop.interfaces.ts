@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────
 
 import type { IShop } from "../../models/boutique.model.js";
+import { isShopSuspended } from "../helpers/moderation.helper.js";
 import { toShopDeliverySettingsDto, type DeliverySettingsDto } from "./Delivery.interfaces.js";
 
 export interface ShopResponseDto {
@@ -16,6 +17,8 @@ export interface ShopResponseDto {
   adresse?: string | undefined;
   /** Modes de livraison proposés par défaut aux produits de la boutique. */
   delivery: DeliverySettingsDto;
+  /** Présent seulement pendant une suspension : plus de nouvelle commande d'ici là. */
+  suspendedUntil?: Date | undefined;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,6 +33,7 @@ export const toShopResponseDto = (shop: IShop): ShopResponseDto => ({
   email: shop.email,
   adresse: shop.adresse,
   delivery: toShopDeliverySettingsDto(shop),
+  ...(shop.suspendedUntil && isShopSuspended(shop) ? { suspendedUntil: shop.suspendedUntil } : {}),
   createdAt: shop.createdAt,
   updatedAt: shop.updatedAt,
 });
