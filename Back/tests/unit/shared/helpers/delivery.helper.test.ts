@@ -327,3 +327,41 @@ describe("selectionFromBody", () => {
     expect(selectionFromBody({ deliveryMethod: "express" }).all).toBeUndefined();
   });
 });
+
+// ─────────────────────────────────────────────
+describe("quoteDelivery — livraison offerte", () => {
+  const depot = makeShop({ nom: "Dépôt Matam", adresse: "Matam", delivery: { modes: [FLAT_RATE], flatRateFee: 50_000 } });
+  const coloris = makeShop({ nom: "Coloris", adresse: "Ratoma", delivery: { modes: [FLAT_RATE], flatRateFee: 30_000 } });
+  const line = (shop: ReturnType<typeof makeShop>) => ({ offer: makeProductBoutique({ boutiqueId: shop._id, delivery: inherit }), quantity: 1 });
+  const rule = (subtotal: number, minAmount = 100_000) => ({ minAmount, subtotal, label: "Livraison offerte dès 100 000" });
+
+  it("met les frais à 0 quand la part atteint le seuil", () => {
+    const quote = quoteDelivery([line(depot)], [depot], {}, new Map([[String(depot._id), rule(100_000)]]));
+
+    expect(quote.groups[0]).toMatchObject({
+      fee: 0,
+      selectedMethod: FLAT_RATE,
+      freeShipping: { threshold: 100_000, applied: true, remaining: 0, label: "Livraison offerte dès 100 000" },
+    });
+    expect(quote.shippingFee).toBe(0);
+  });
+
+  it("garde les frais sous le seuil et dit ce qu'il reste à ajouter", () => {
+    const quote = quoteDelivery([line(depot)], [depot], {}, new Map([[String(depot._id), rule(70_000)]]));
+
+    expect(quote.groups[0]).toMatchObject({ fee: 50_000, freeShipping: { applied: false, remaining: 30_000 } });
+    expect(quote.shippingFee).toBe(50_000);
+  });
+
+  it("ne touche qu'à la boutique qui offre la livraison", () => {
+    const quote = quoteDelivery([line(depot), line(coloris)], [depot, coloris], {}, new Map([[String(coloris._id), rule(150_000)]]));
+
+    expect(quote.groups.map((group) => group.fee)).toEqual([50_000, 0]);
+    expect(quote.groups[0]).not.toHaveProperty("freeShipping");
+    expect(quote.shippingFee).toBe(50_000);
+  });
+
+  it("se comporte comme avant sans livraison offerte", () => {
+    expect(quoteDelivery([line(depot)], [depot], {}).groups[0]).not.toHaveProperty("freeShipping");
+  });
+});

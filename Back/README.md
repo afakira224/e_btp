@@ -522,7 +522,7 @@ par plus de clients, toujours avec la mention « Sponsorisé ».
 
 ## Tests
 
-1 760+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
+2 320+ tests unitaires, exécutés sans base de données ni serveur : modèles Mongoose,
 sessions de transaction, `express-validator`, `fs` et les emails sont simulés.
 
 Voir [tests/README.md](tests/README.md) pour l'organisation et le guide d'ajout.

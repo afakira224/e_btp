@@ -62,6 +62,21 @@ vi.mock("../../../../src/shared/services/shopOrder.notifications.js", () => ({
   deliverNotices: vi.fn(async () => undefined),
 }));
 
+// Suspension des promotions : promotions arrêtées, prix recalculés, boosts arrêtés.
+vi.mock("../../../../src/models/promotion.model.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../src/models/promotion.model.js")>();
+  const { mockModel } = await import("../../../helpers/model.mock.js");
+  return { ...actual, Promotion: mockModel() };
+});
+
+vi.mock("../../../../src/shared/services/pricing.service.js", () => ({
+  recomputeOfferPricing: vi.fn(async () => 0),
+}));
+
+vi.mock("../../../../src/shared/services/boost.service.js", () => ({
+  stopShopBoosts: vi.fn(async () => 0),
+}));
+
 import { Shop } from "../../../../src/models/boutique.model.js";
 import { Product, productBoutique } from "../../../../src/models/product.model.js";
 import { Review } from "../../../../src/models/review.model.js";
@@ -76,6 +91,9 @@ import { recomputeRating } from "../../../../src/shared/helpers/review.helper.js
 import { ShopOrderAction } from "../../../../src/shared/helpers/shopOrder.workflow.js";
 import { applyShopOrderAction, settleProviderRefund } from "../../../../src/shared/services/shopOrder.service.js";
 import { deliverNotices, noticesForAction } from "../../../../src/shared/services/shopOrder.notifications.js";
+import { Promotion, PromotionStatus } from "../../../../src/models/promotion.model.js";
+import { recomputeOfferPricing } from "../../../../src/shared/services/pricing.service.js";
+import { stopShopBoosts } from "../../../../src/shared/services/boost.service.js";
 import {
   applySanction,
   checkSanctionInput,
@@ -106,8 +124,9 @@ const ReviewMock = Review as unknown as Record<string, any>;
 const SanctionMock = Sanction as unknown as Record<string, any>;
 const ShopOrderMock = ShopOrder as unknown as Record<string, any>;
 const UserMock = User as unknown as Record<string, any>;
+const PromotionMock = Promotion as unknown as Record<string, any>;
 
-const { HIDE, WARNING, SUSPENSION, BLOCK } = SanctionType;
+const { HIDE, WARNING, SUSPENSION, BLOCK, PROMO_BAN } = SanctionType;
 const K = SanctionTargetKind;
 const NOW = new Date("2026-10-25T10:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -183,6 +202,8 @@ beforeEach(() => {
   vi.mocked(settleProviderRefund).mockResolvedValue(undefined);
   vi.mocked(noticesForAction).mockReturnValue([]);
   vi.mocked(deliverNotices).mockResolvedValue(undefined);
+  vi.mocked(recomputeOfferPricing).mockResolvedValue(0);
+  vi.mocked(stopShopBoosts).mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -801,6 +822,125 @@ describe("isSanctionActive", () => {
   });
 
   it("nomme chaque mesure", () => {
-    expect(SANCTION_LABELS).toEqual({ hide: "Masquage", warning: "Avertissement", suspension: "Suspension", block: "Blocage" });
+    expect(SANCTION_LABELS).toEqual({
+      hide: "Masquage",
+      warning: "Avertissement",
+      suspension: "Suspension",
+      block: "Blocage",
+      promo_ban: "Promotions suspendues",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────
+describe("applySanction — suspendre les promotions", () => {
+  it("n'accepte qu'une boutique et une durée de 7, 15 ou 30 jours", () => {
+    expect(checkSanctionInput({ type: PROMO_BAN, targetKind: K.SHOP, reason: "Faux prix barré.", days: 15 })).toBeNull();
+    expect(checkSanctionInput({ type: PROMO_BAN, targetKind: K.USER, reason: "Faux prix barré.", days: 15 })).toBe(
+      "Promotions suspendues ne vise pas cette cible."
+    );
+    expect(checkSanctionInput({ type: PROMO_BAN, targetKind: K.SHOP, reason: "Faux prix barré.", days: 3 })).toBe(
+      "Durée de suspension invalide. Valeurs acceptées : 7, 15, 30 jours."
+    );
+  });
+
+  it("bloque les promotions pour la durée choisie et arrête celles en cours ou à venir", async () => {
+    await apply({ type: PROMO_BAN, days: 15, reason: "Faux prix barré." });
+
+    expect(w.shop.promotionsBlockedUntil).toEqual(later(15 * DAY));
+    expect(w.shop.save).toHaveBeenCalledWith({ session });
+    expect(created().endsAt).toEqual(later(15 * DAY));
+    const [filter, update, options] = PromotionMock.updateMany.mock.calls[0]!;
+    expect(filter).toEqual({
+      boutiqueId: w.shop._id,
+      status: { $in: [PromotionStatus.DRAFT, PromotionStatus.SCHEDULED, PromotionStatus.ACTIVE, PromotionStatus.PAUSED] },
+    });
+    expect(update).toEqual({
+      $set: { status: PromotionStatus.STOPPED, stoppedAt: NOW, stopReason: "Promotions suspendues par la modération." },
+    });
+    expect(options).toEqual({ session });
+  });
+
+  it("recalcule les prix de la boutique et arrête ses boosts après la transaction", async () => {
+    await apply({ type: PROMO_BAN, days: 7 });
+
+    expect(recomputeOfferPricing).toHaveBeenCalledWith({ boutiqueId: String(w.shop._id) }, NOW);
+    expect(stopShopBoosts).toHaveBeenCalledWith(String(w.shop._id), "Promotions suspendues par la modération.", NOW);
+    expect(session.commitTransaction).toHaveBeenCalled();
+  });
+
+  it("annonce la date de fin au gérant", async () => {
+    await apply({ type: PROMO_BAN, days: 30 });
+
+    expect(sendNoticeMail).toHaveBeenCalledWith(
+      expect.objectContaining({ title: `Promotions suspendues jusqu'au ${later(30 * DAY).toLocaleDateString("fr-FR")}` })
+    );
+  });
+
+  it("garde une suspension des promotions plus longue déjà en cours", async () => {
+    w.shop.promotionsBlockedUntil = later(30 * DAY);
+
+    await apply({ type: PROMO_BAN, days: 7 });
+
+    expect(w.shop.promotionsBlockedUntil).toEqual(later(30 * DAY));
+    expect(created().endsAt).toEqual(later(7 * DAY));
+  });
+
+  it("garde la mesure même si le recalcul des prix ou l'arrêt des boosts échoue", async () => {
+    vi.mocked(recomputeOfferPricing).mockRejectedValueOnce(new Error("réplique indisponible"));
+    vi.mocked(stopShopBoosts).mockRejectedValueOnce(new Error("réplique indisponible"));
+
+    const sanction = await apply({ type: PROMO_BAN, days: 7 });
+
+    expect(sanction.type).toBe(PROMO_BAN);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("non recalculés"));
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("non arrêtés"));
+  });
+
+  it("ne touche ni aux prix ni aux boosts pour une autre mesure", async () => {
+    await apply({ type: SUSPENSION, days: 7 });
+
+    expect(PromotionMock.updateMany).not.toHaveBeenCalled();
+    expect(recomputeOfferPricing).not.toHaveBeenCalled();
+    expect(stopShopBoosts).not.toHaveBeenCalled();
+  });
+});
+
+describe("liftSanction — promotions suspendues", () => {
+  const ban = (over: Record<string, unknown> = {}) =>
+    makeSanction({ type: PROMO_BAN, target: { kind: K.SHOP, id: w.shop._id, label: "Boutique Kaloum" }, endsAt: later(7 * DAY), ...over });
+
+  it("rend les promotions à la boutique", async () => {
+    w.shop.promotionsBlockedUntil = later(7 * DAY);
+    SanctionMock.findById.mockReturnValueOnce(mockQuery(ban()));
+    SanctionMock.find.mockReturnValueOnce(mockQuery([]));
+
+    await liftSanction(oid().toString(), ADMIN_ID, undefined, NOW);
+
+    expect(w.shop.promotionsBlockedUntil).toBeNull();
+    expect(w.shop.save).toHaveBeenCalledWith({ session });
+    expect(SanctionMock.find.mock.calls[0]![0]).toMatchObject({ type: PROMO_BAN, "target.id": w.shop._id, liftedAt: null });
+  });
+
+  it("garde la plus longue des autres suspensions des promotions en cours", async () => {
+    w.shop.promotionsBlockedUntil = later(30 * DAY);
+    SanctionMock.findById.mockReturnValueOnce(mockQuery(ban()));
+    SanctionMock.find.mockReturnValueOnce(
+      mockQuery([makeSanction({ type: PROMO_BAN, endsAt: later(30 * DAY) }), makeSanction({ type: PROMO_BAN, endsAt: later(15 * DAY) })])
+    );
+
+    await liftSanction(oid().toString(), ADMIN_ID, undefined, NOW);
+
+    expect(w.shop.promotionsBlockedUntil).toEqual(later(30 * DAY));
+  });
+
+  it("ne touche pas à une boutique dont les promotions ne sont plus bloquées", async () => {
+    w.shop.promotionsBlockedUntil = null;
+    SanctionMock.findById.mockReturnValueOnce(mockQuery(ban()));
+
+    await liftSanction(oid().toString(), ADMIN_ID, undefined, NOW);
+
+    expect(w.shop.save).not.toHaveBeenCalled();
+    expect(SanctionMock.find).not.toHaveBeenCalled();
   });
 });

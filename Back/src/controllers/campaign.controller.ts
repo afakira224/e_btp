@@ -7,7 +7,7 @@ import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import { enrichProductBoutiques } from "../shared/helpers/productBoutique.helper.js";
 import { invalid, sendError } from "../shared/helpers/http.helper.js";
 import { HttpError } from "../shared/middlewares/error.middleware.js";
-import { campaignOfferIds, campaignState, checkCampaignInput, joinCampaign } from "../shared/services/promotion.service.js";
+import { campaignOfferIds, campaignState, checkCampaignInput, joinCampaign, syncCampaignPromotions } from "../shared/services/promotion.service.js";
 import { toShopPromotionDto } from "../shared/interfaces/ShopPromotion.interfaces.js";
 
 // ─────────────────────────────────────────────
@@ -126,6 +126,8 @@ export const updateCampaign = async (req: Request, res: Response) => {
     const refusal = checkCampaignInput(campaign);
     if (refusal) throw new HttpError(refusal, 400);
     await campaign.save();
+    // Les promotions inscrites suivent : closes avec la campagne, ou à ses nouvelles dates.
+    await syncCampaignPromotions(campaign, new Date());
     const response = BaseResponse.WithSuccess(toCampaignDto(campaign, new Date()), "Campagne modifiée.");
     return res.status(response.statusCode).json(response);
   } catch (error) {

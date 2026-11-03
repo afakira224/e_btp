@@ -18,11 +18,15 @@ import type { IShopRequest } from "../../src/models/shopRequest.model.js";
 import type { ISupportTicket } from "../../src/models/supportTicket.model.js";
 import type { ISupportMessage } from "../../src/models/supportMessage.model.js";
 import type { ISanction } from "../../src/models/sanction.model.js";
+import type { IBoost } from "../../src/models/boost.model.js";
+import type { ICampaign } from "../../src/models/campaign.model.js";
+import { BoostGoal, BoostKind, BoostRelation, BoostStatus } from "../../src/models/boost.model.js";
 import { DeliveryMethod, OrderStatus, PaymentMethod } from "../../src/models/order.model.js";
 import { ShopOrderPaymentStatus, ShopOrderStatus } from "../../src/models/shopOrder.model.js";
 import {
   DiscountType,
   PromotionScope,
+  PromotionStatus,
   PromotionType,
 } from "../../src/models/promotion.model.js";
 import {
@@ -160,6 +164,10 @@ export const makeProductBoutique = (over: Over<IProductBoutique> = {}): IProduct
     tags: ["samsung", "smartphone"],
     rating: 4.5,
     reviewsCount: 12,
+    promo: null,
+    quantityTiers: [],
+    salesCount30d: 0,
+    featuredRank: null,
     ...over,
   }) as unknown as IProductBoutique;
 
@@ -318,8 +326,79 @@ export const makePromotion = (over: Over<IPromotion> = {}): IPromotion =>
     usageLimit: null,
     usedCount: 0,
     actif: true,
+    // Défauts du schéma : promotion de la plateforme, en cours, cumulable.
+    boutiqueId: null,
+    status: PromotionStatus.ACTIVE,
+    tiers: [],
+    flashQuantity: null,
+    flashSold: 0,
+    perCustomerLimit: null,
+    stackable: true,
+    campaignId: null,
+    highDiscountConfirmed: false,
+    stoppedAt: null,
+    stopReason: null,
     ...over,
   }) as unknown as IPromotion;
+
+/**
+ * Promotion de boutique : remise produit de 20 % en cours sur une offre,
+ * lancée par la boutique fournie (ou une boutique neuve).
+ */
+export const makeShopPromotion = (over: Over<IPromotion> = {}): IPromotion =>
+  makePromotion({
+    nom: "Remise d'octobre",
+    description: "",
+    type: PromotionType.PRODUCT_DISCOUNT,
+    scope: PromotionScope.PRODUCT_BOUTIQUE,
+    discountValue: 20,
+    code: null,
+    boutiqueId: oid(),
+    productBoutiqueIds: [oid()],
+    ...over,
+  });
+
+/** Boost de produit en cours : 10 000 GNF par jour pendant 5 jours, rien de dépensé. */
+export const makeBoost = (over: Over<IBoost> = {}): IBoost =>
+  doc({
+    _id: oid(),
+    boutiqueId: oid(),
+    kind: BoostKind.PRODUCT,
+    promotionId: null,
+    productBoutiqueIds: [oid()],
+    goal: BoostGoal.VISITS,
+    audience: { mode: "auto", communes: [], villes: [], customerTypes: [], interestFamilleIds: [], relation: BoostRelation.ALL },
+    dailyBudget: 10_000,
+    reserved: 50_000,
+    spent: 0,
+    costPerVisit: 500,
+    costPerThousandViews: 5_000,
+    startDate: new Date("2026-10-20T00:00:00.000Z"),
+    endDate: new Date("2026-10-30T00:00:00.000Z"),
+    status: BoostStatus.ACTIVE,
+    stopReason: null,
+    endedAt: null,
+    refunded: 0,
+    createdBy: null,
+    ...over,
+  }) as unknown as IBoost;
+
+/** Campagne de la plateforme : « Soldes d'octobre », 10 % au moins, tout le catalogue. */
+export const makeCampaign = (over: Over<ICampaign> = {}): ICampaign =>
+  doc({
+    _id: oid(),
+    slug: "soldes-octobre",
+    nom: "Soldes d'octobre",
+    description: "Les soldes de la plateforme",
+    startDate: new Date("2026-10-20T00:00:00.000Z"),
+    endDate: new Date("2026-11-10T00:00:00.000Z"),
+    minDiscount: 10,
+    familleIds: [],
+    image: null,
+    actif: true,
+    createdBy: null,
+    ...over,
+  }) as unknown as ICampaign;
 
 export const makeShopRequest = (over: Over<IShopRequest> = {}): IShopRequest =>
   doc({

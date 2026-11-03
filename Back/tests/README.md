@@ -33,24 +33,24 @@ tests/
 ├── helpers/
 │   ├── express.mock.ts          # mockRequest / mockResponse / mockSession
 │   ├── model.mock.ts            # mockModel / mockQuery (modèles Mongoose simulés)
-│   ├── factories.ts             # fabriques de documents (makeCart, makeOrder, ...)
+│   ├── factories.ts             # fabriques de documents (makeCart, makeOrder, makeShopPromotion, makeBoost, makeCampaign, ...)
 │   └── validation.ts            # exécution de ValidationChain sans serveur Express
 └── unit/
     ├── controllers/             # contrôleurs : codes HTTP, règles métier, transactions
-    ├── migrations/              # découpage des commandes existantes en sous-commandes
+    ├── migrations/              # découpage des commandes existantes, remises manuelles → promotions
     └── shared/
         ├── BaseResponse.test.ts
         ├── middlewares/         # authentification, rôles, erreurs, validation
         ├── forms/               # règles express-validator
-        ├── helpers/             # fileUpload (fs simulé), workflows des sous-commandes et du support, transactions
+        ├── helpers/             # fileUpload (fs simulé), workflows des sous-commandes et du support, règles des promotions, transactions
         ├── interfaces/          # mappers DTO et calculs de promotion
         ├── payment/             # choix du prestataire de paiement
-        └── services/            # actions sur les sous-commandes, paiement, délais, avis, support, sanctions
+        └── services/            # sous-commandes, paiement, délais, avis, support, sanctions, moteur de prix, promotions, boosts
 ```
 
 ## Périmètre couvert
 
-**1 760 tests**.
+**2 326 tests**, sans anomalie connue en attente (voir plus bas).
 
 | Domaine | Fichiers testés |
 | --- | --- |
@@ -63,7 +63,22 @@ tests/
 | Fichiers | `fileUpload` (URL publique, suppression, limites de taille) |
 | Contrôleurs | auth, panier, commande, sous-commande, paiement, promotion, avis, favoris, adresse, produit, produit-boutique, boutique, demande de boutique, famille, catégorie, sous-catégorie |
 | Cycle de vie des commandes | règles des actions (`shopOrder.workflow`), effets (`shopOrder.service` : stock, remboursements, statut de la commande), paiement en ligne, délais automatiques, avis par email, migration des commandes existantes |
+| Promotions et boosts | règles pures (`promotion.rules` : état selon les dates et les quantités, remise de 5 à 70 % et confirmation au-delà de 50 %, vente flash de 2 à 72 h, durées, paliers croissants, plafonds par boutique, ancienneté, actions permises par état), moteur de prix (`pricing.service` : meilleure remise jamais cumulée, prix de référence sur 30 jours, promotion d'une boutique limitée à ses offres, promotion boutique par famille/catégorie/exclusions, paliers, prix du checkout avec repli quand la quantité flash manque, codes de boutique ou de la plateforme, cumulables ou non, montant minimum, livraison offerte au seuil le plus bas, planificateur, meilleures ventes), promotions de boutique (`promotion.service` : création, modification, lancement, pause, reprise, prolongation, arrêt, droits, boutique suspendue ou privée de promotions, délai entre deux ventes flash, code déjà pris, produits phares, campagnes), boosts (`boost.service` : crédits réservés puis rendus, ancienneté, audience minimale, offres montrables, fin d'une promotion boostée, arrêts automatiques, places sponsorisées avec pertinence, plafond d'affichages, part par boutique, rythme de dépense et facturation, visites comptées une fois par jour hors gérant, administration et robots, attribution des ventes), checkout (409 et panier rafraîchi sur une hausse, baisse appliquée, quantité flash décomptée, code de boutique sur sa part, remise de la plateforme à sa charge, limite par client, livraison offerte), DTO (panier aux prix du moment, prix d'une offre, promotion, boost), formulaires, contrôleurs (promotions de boutique, campagnes, boosts, crédits, places sponsorisées), sanction « promotions suspendues », migration |
 | Support et modération | règles des demandes (`support.workflow` : motifs, priorités, délais, actions, messages, barème des sanctions), écritures (`support.service` : ouverture par type de cible, doublons, signalements abusifs, masquage provisoire après 3 signalements, messages, actions, échéances), retour lié à la sous-commande (`support.returns`), avis par email (`support.notifications`), sanctions (`sanction.service` : masquage, avertissement, suspension, blocage avec sessions fermées et commandes annulées, levée, remise en ligne), DTO (`Support.interfaces`), formulaires, contrôleurs support et sanctions, effets de la modération (connexion bloquée, panier et commande refusés, offre masquée, note recalculée sans les avis masqués) |
+
+## Anomalies connues (`it.fails`)
+
+Un défaut repéré dans `src/` mais pas encore corrigé est décrit par un test
+`it.fails(...)`, précédé d'un commentaire `ANOMALIE` (fichier, scénario) : le
+test affirme le comportement attendu et la suite reste verte tant qu'il échoue.
+Une fois le défaut corrigé, Vitest signale le test : il suffit alors de le
+passer en `it(...)` et de le ranger parmi les `régressions`.
+
+Aucune anomalie n'est en attente. Les huit relevées sur les promotions et les
+boosts sont corrigées et gardées par leurs tests (`describe("régressions — …")`) :
+promotion en pause échue, unités flash rendues, prix recalculés après une
+écriture de l'administration, budget d'un boost et recharge crédités une seule
+fois, boutique suspendue, messages des formulaires.
 
 ## Écrire un nouveau test de contrôleur
 

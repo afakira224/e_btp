@@ -37,6 +37,21 @@ vi.mock("../../../src/shared/helpers/fileUpload.js", () => ({
   cleanupUploadedFiles: vi.fn(),
 }));
 
+// Moteur de prix, boosts, produits phares et campagnes : testés dans leurs services.
+vi.mock("../../../src/shared/services/pricing.service.js", () => ({
+  recordPrice: vi.fn(async () => undefined),
+  recomputeOfferPricing: vi.fn(async () => 0),
+}));
+
+vi.mock("../../../src/shared/services/boost.service.js", () => ({
+  recordBoostVisit: vi.fn(async () => true),
+}));
+
+vi.mock("../../../src/shared/services/promotion.service.js", () => ({
+  campaignOfferIds: vi.fn(async () => new Map()),
+  setFeaturedRank: vi.fn(async () => undefined),
+}));
+
 vi.mock("express-validator", async (importOriginal) => {
   const actual = await importOriginal<typeof import("express-validator")>();
   return {
@@ -53,6 +68,10 @@ import { Categorie } from "../../../src/models/categorie.model.js";
 import { SousCategorie } from "../../../src/models/sousCategorie.model.js";
 import { RecentlyViewed } from "../../../src/models/recentlyViewed.model.js";
 import { cleanupUploadedFiles, deleteFileByUrl } from "../../../src/shared/helpers/fileUpload.js";
+import { recordPrice, recomputeOfferPricing } from "../../../src/shared/services/pricing.service.js";
+import { recordBoostVisit } from "../../../src/shared/services/boost.service.js";
+import { campaignOfferIds, setFeaturedRank } from "../../../src/shared/services/promotion.service.js";
+import { HttpError } from "../../../src/shared/middlewares/error.middleware.js";
 import {
   createProductBoutique,
   deleteProductBoutique,
@@ -61,6 +80,7 @@ import {
   getRecentlyViewed,
   getSuggestions,
   searchProductBoutiques,
+  setFeaturedProduct,
   updateProductBoutique,
 } from "../../../src/controllers/productBoutique.controller.js";
 import { mockQuery } from "../../helpers/model.mock.js";
@@ -114,6 +134,11 @@ beforeEach(() => {
   SousCategorieMock.find.mockReturnValue(mockQuery([]));
   SousCategorieMock.findById.mockReturnValue(mockQuery(null));
   RecentlyViewedMock.findOne.mockReturnValue(mockQuery(null));
+  vi.mocked(recordPrice).mockResolvedValue(undefined);
+  vi.mocked(recomputeOfferPricing).mockResolvedValue(0);
+  vi.mocked(recordBoostVisit).mockResolvedValue(true);
+  vi.mocked(campaignOfferIds).mockResolvedValue(new Map());
+  vi.mocked(setFeaturedRank).mockResolvedValue(undefined);
 });
 
 // ─────────────────────────────────────────────
@@ -132,6 +157,34 @@ describe("getProductBoutiques", () => {
     expect(res.body.data.items[0].boutique.nom).toBe("Boutique Kaloum");
     // Sans boutiqueId, aucune vérification d'existence de boutique n'est faite.
     expect(ShopMock.findById).not.toHaveBeenCalled();
+  });
+
+  it("liste les produits phares d'une vitrine dans leur ordre", async () => {
+    const query = mockQuery([]);
+    PbMock.find.mockReturnValue(query);
+
+    await getProductBoutiques(mockRequest({ query: { featured: "true" } }), mockResponse());
+
+    expect(PbMock.find).toHaveBeenCalledWith(expect.objectContaining({ featuredRank: { $ne: null } }));
+    expect(query.sort).toHaveBeenCalledWith({ featuredRank: 1 });
+  });
+
+  it("classe les meilleures ventes sur 30 jours", async () => {
+    const query = mockQuery([]);
+    PbMock.find.mockReturnValue(query);
+
+    await getProductBoutiques(mockRequest({ query: { sort: "best_sellers" } }), mockResponse());
+
+    expect(query.sort).toHaveBeenCalledWith({ salesCount30d: -1, createdAt: -1 });
+  });
+
+  it("trie par date par défaut", async () => {
+    const query = mockQuery([]);
+    PbMock.find.mockReturnValue(query);
+
+    await getProductBoutiques(mockRequest(), mockResponse());
+
+    expect(query.sort).toHaveBeenCalledWith({ createdAt: -1 });
   });
 
   it("renvoie 404 quand la boutique filtrée n'existe pas", async () => {
@@ -216,6 +269,59 @@ describe("getProductBoutiqueById", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data.product.name).toBe("Galaxy A15");
     expect(res.body.data.boutique.nom).toBe("Kaloum");
+  });
+
+  it("compte la visite venue d'une place sponsorisée (?src=boost:<id>)", async () => {
+    const pb = makeProductBoutique();
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    const boostId = oid().toString();
+    const userId = oid().toString();
+    const req = mockRequest({
+      params: { id: pb._id.toString() },
+      query: { src: `boost:${boostId}` },
+      session: mockExpressSession({ id: userId, entityType: "user" }),
+    });
+    (req as any).get = (name: string) => (name === "user-agent" ? "Mozilla/5.0" : undefined);
+    const res = mockResponse();
+
+    await getProductBoutiqueById(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(recordBoostVisit).toHaveBeenCalledWith({
+      boostId,
+      offerId: pb._id.toString(),
+      viewer: { key: `user:${userId}`, userId },
+      viewerRole: "user",
+      userAgent: "Mozilla/5.0",
+    });
+  });
+
+  it("ne compte aucune visite de boost sans provenance sponsorisée", async () => {
+    PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
+
+    await getProductBoutiqueById(mockRequest({ params: { id: oid().toString() }, query: { src: "home" } }), mockResponse());
+
+    expect(recordBoostVisit).not.toHaveBeenCalled();
+  });
+
+  it("affiche la fiche même quand la visite du boost ne peut pas être comptée", async () => {
+    PbMock.findById.mockReturnValue(mockQuery(makeProductBoutique()));
+    vi.mocked(recordBoostVisit).mockRejectedValueOnce(new Error("statistiques indisponibles"));
+    const res = mockResponse();
+
+    await getProductBoutiqueById(mockRequest({ params: { id: oid().toString() }, query: { src: `boost:${oid()}` } }), res);
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("expose le prix calculé de l'offre", async () => {
+    const pb = makeProductBoutique({ price: 10_000, discountPrice: 8_000, stock: 3 });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    const res = mockResponse();
+
+    await getProductBoutiqueById(mockRequest({ params: { id: pb._id.toString() } }), res);
+
+    expect(res.body.data.pricing).toEqual({ basePrice: 10_000, price: 8_000, tiers: [] });
   });
 
   it("renvoie 404 quand le produit en boutique est introuvable", async () => {
@@ -484,6 +590,39 @@ describe("createProductBoutique", () => {
     expect(session.commitTransaction).toHaveBeenCalled();
     expect(session.endSession).toHaveBeenCalled();
   });
+
+  it("enregistre le premier prix de l'historique dans la transaction", async () => {
+    await createProductBoutique(withFiles(["/tmp/a.jpg"]), mockResponse());
+
+    const created = await PbMock.create.mock.results[0]!.value;
+    expect(recordPrice).toHaveBeenCalledWith(created[0]._id, 1_500_000, expect.any(Date), session);
+    expect(vi.mocked(recordPrice).mock.invocationCallOrder[0]!).toBeLessThan(session.commitTransaction.mock.invocationCallOrder[0]!);
+  });
+
+  it("n'écrit jamais le prix remisé, la note ni le nombre d'avis envoyés par la boutique", async () => {
+    const req = mockRequest({
+      body: body({ discountPrice: 100, rating: 5, reviewsCount: 999, isFeatured: true }),
+      user: { id: oid().toString(), entityType: "shop" },
+    });
+    (req as any).files = [uploadedFile("/tmp/a.jpg")];
+    // La boutique appartient au vendeur connecté.
+    ShopMock.findById.mockReturnValue(mockQuery(makeShop({ ownerId: new mongoose.Types.ObjectId((req as any).user.id) })));
+
+    await createProductBoutique(req, mockResponse());
+
+    const created = PbMock.create.mock.calls[0]![0][0];
+    expect(created).not.toHaveProperty("discountPrice");
+    expect(created).not.toHaveProperty("rating");
+    expect(created).not.toHaveProperty("reviewsCount");
+    // « Mis en avant » est réservé à l'administration.
+    expect(created.isFeatured).toBe(false);
+  });
+
+  it("laisse l'administration mettre une offre en avant", async () => {
+    await createProductBoutique(withFiles(["/tmp/a.jpg"], body({ isFeatured: true })), mockResponse());
+
+    expect(PbMock.create.mock.calls[0]![0][0].isFeatured).toBe(true);
+  });
 });
 
 // ─────────────────────────────────────────────
@@ -512,6 +651,68 @@ describe("updateProductBoutique", () => {
     expect(pb.stock).toBe(5);
     expect(pb.save).toHaveBeenCalledWith({ session });
     expect(res.statusCode).toBe(200);
+  });
+
+  it("inscrit un nouveau prix dans l'historique, puis recalcule le prix promotionnel après la transaction", async () => {
+    const pb = makeProductBoutique({ price: 1_000 });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+
+    await updateProductBoutique(
+      mockRequest({ params: { id: pb._id.toString() }, body: { price: 2_000 }, user: ADMIN }),
+      mockResponse()
+    );
+
+    expect(recordPrice).toHaveBeenCalledWith(pb._id, 2_000, expect.any(Date), session);
+    expect(recomputeOfferPricing).toHaveBeenCalledWith({ offerIds: [pb._id] });
+    expect(session.commitTransaction.mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(recomputeOfferPricing).mock.invocationCallOrder[0]!
+    );
+  });
+
+  it("ne touche ni à l'historique ni aux prix quand le prix ne change pas", async () => {
+    const pb = makeProductBoutique({ price: 1_000 });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+
+    await updateProductBoutique(
+      mockRequest({ params: { id: pb._id.toString() }, body: { price: 1_000, stock: 3 }, user: ADMIN }),
+      mockResponse()
+    );
+
+    expect(recordPrice).not.toHaveBeenCalled();
+    expect(recomputeOfferPricing).not.toHaveBeenCalled();
+  });
+
+  it("ignore le prix remisé, la note et le nombre d'avis envoyés", async () => {
+    const pb = makeProductBoutique({ price: 1_000, discountPrice: null, rating: 3, reviewsCount: 2 });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+
+    await updateProductBoutique(
+      mockRequest({ params: { id: pb._id.toString() }, body: { discountPrice: 10, rating: 5, reviewsCount: 500 }, user: ADMIN }),
+      mockResponse()
+    );
+
+    expect(pb.discountPrice).toBeNull();
+    expect(pb.rating).toBe(3);
+    expect(pb.reviewsCount).toBe(2);
+  });
+
+  it("ne laisse que l'administration changer « mis en avant »", async () => {
+    const owner = oid();
+    const pb = makeProductBoutique({ isFeatured: false });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    ShopMock.findById.mockReturnValue(mockQuery(makeShop({ _id: pb.boutiqueId, ownerId: owner })));
+
+    await updateProductBoutique(
+      mockRequest({ params: { id: pb._id.toString() }, body: { isFeatured: true }, user: { id: owner.toString(), entityType: "shop" } }),
+      mockResponse()
+    );
+    expect(pb.isFeatured).toBe(false);
+
+    await updateProductBoutique(
+      mockRequest({ params: { id: pb._id.toString() }, body: { isFeatured: true }, user: ADMIN }),
+      mockResponse()
+    );
+    expect(pb.isFeatured).toBe(true);
   });
 
   it("accepte une remise à zéro du stock", async () => {
@@ -824,12 +1025,39 @@ describe("searchProductBoutiques", () => {
     );
   });
 
-  it("ne retient que les produits réellement remisés", async () => {
+  it("ne retient que les offres en stock dont la remise affichée atteint 5 %", async () => {
     await searchProductBoutiques(mockRequest({ query: { discounted: "true" } }), mockResponse());
 
     expect(PbMock.find).toHaveBeenCalledWith(
-      expect.objectContaining({ $expr: { $lt: ["$discountPrice", "$price"] } })
+      expect.objectContaining({ "promo.percent": { $gte: 5 }, stock: { $gt: 0 } })
     );
+  });
+
+  it("filtre sur les offres inscrites à une campagne", async () => {
+    const campaignId = oid().toString();
+    const offerIds = [oid(), oid()];
+    vi.mocked(campaignOfferIds).mockResolvedValueOnce(new Map([[campaignId, offerIds]]));
+
+    await searchProductBoutiques(mockRequest({ query: { campaignId } }), mockResponse());
+
+    const [ids] = vi.mocked(campaignOfferIds).mock.calls[0]!;
+    expect(ids.map(String)).toEqual([campaignId]);
+    expect(PbMock.find).toHaveBeenCalledWith(expect.objectContaining({ _id: { $in: offerIds } }));
+  });
+
+  it("ne renvoie rien pour une campagne sans offre inscrite", async () => {
+    const campaignId = oid().toString();
+
+    await searchProductBoutiques(mockRequest({ query: { campaignId } }), mockResponse());
+
+    expect(PbMock.find).toHaveBeenCalledWith(expect.objectContaining({ _id: { $in: [] } }));
+  });
+
+  it("ignore un identifiant de campagne invalide", async () => {
+    await searchProductBoutiques(mockRequest({ query: { campaignId: "pas-un-id" } }), mockResponse());
+
+    expect(campaignOfferIds).not.toHaveBeenCalled();
+    expect(PbMock.find).toHaveBeenCalledWith(expect.not.objectContaining({ _id: expect.anything() }));
   });
 
   it.each([
@@ -838,6 +1066,8 @@ describe("searchProductBoutiques", () => {
     ["rating", { rating: -1 }],
     ["popular", { reviewsCount: -1 }],
     ["newest", { createdAt: -1 }],
+    ["best_sellers", { salesCount30d: -1, createdAt: -1 }],
+    ["discount", { "promo.percent": -1, createdAt: -1 }],
   ])("trie selon %s", async (sort, expected) => {
     const query = mockQuery([]);
     PbMock.find.mockReturnValue(query);
@@ -874,13 +1104,13 @@ describe("searchProductBoutiques", () => {
     expect(PbMock.countDocuments).not.toHaveBeenCalled();
   });
 
-  it("« en promotion » écarte les offres sans remise (null < prix pour MongoDB)", async () => {
+  it("« en promotion » écarte les offres sans remise affichée et celles en rupture", async () => {
     await searchProductBoutiques(mockRequest({ query: { discounted: "true" } }), mockResponse());
 
     expect(PbMock.countDocuments).toHaveBeenCalledWith({
       hiddenAt: null,
-      discountPrice: { $ne: null },
-      $expr: { $lt: ["$discountPrice", "$price"] },
+      "promo.percent": { $gte: 5 },
+      stock: { $gt: 0 },
     });
   });
 
@@ -1089,5 +1319,64 @@ describe("offres — livraison et droits du vendeur", () => {
       expect(res.statusCode).toBe(403);
       expect(pb.boutiqueId).toBe(mine._id);
     });
+  });
+});
+
+// ─────────────────────────────────────────────
+describe("setFeaturedProduct", () => {
+  const SELLER = { id: oid().toString(), entityType: "shop" };
+
+  it("place l'offre parmi les produits phares et renvoie l'offre", async () => {
+    const pb = makeProductBoutique({ featuredRank: 2 });
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    const res = mockResponse();
+
+    await setFeaturedProduct(mockRequest({ params: { id: pb._id.toString() }, body: { rank: "2" }, user: SELLER }), res);
+
+    expect(setFeaturedRank).toHaveBeenCalledWith(SELLER, pb._id.toString(), 2);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toBe("Produit phare n° 2");
+    expect(res.body.data.featuredRank).toBe(2);
+  });
+
+  it("retire l'offre des produits phares avec rank null", async () => {
+    const pb = makeProductBoutique();
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    const res = mockResponse();
+
+    await setFeaturedProduct(mockRequest({ params: { id: pb._id.toString() }, body: { rank: null }, user: SELLER }), res);
+
+    expect(setFeaturedRank).toHaveBeenCalledWith(SELLER, pb._id.toString(), null);
+    expect(res.body.message).toBe("Produit retiré des produits phares");
+    expect(res.body.data).not.toHaveProperty("featuredRank");
+  });
+
+  it("renvoie 422 quand le rang est invalide", async () => {
+    failValidation(["Rang de 1 à 6, ou null pour retirer le produit."]);
+    const res = mockResponse();
+
+    await setFeaturedProduct(mockRequest({ params: { id: oid().toString() }, body: { rank: 9 }, user: SELLER }), res);
+
+    expect(res.statusCode).toBe(422);
+    expect(setFeaturedRank).not.toHaveBeenCalled();
+  });
+
+  it("garde le code d'une erreur métier (offre d'une autre boutique)", async () => {
+    vi.mocked(setFeaturedRank).mockRejectedValueOnce(new HttpError("Vous ne pouvez gérer que vos propres boutiques.", 403));
+    const res = mockResponse();
+
+    await setFeaturedProduct(mockRequest({ params: { id: oid().toString() }, body: { rank: 1 }, user: SELLER }), res);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body.message).toBe("Vous ne pouvez gérer que vos propres boutiques.");
+  });
+
+  it("renvoie 500 sur une erreur inattendue", async () => {
+    vi.mocked(setFeaturedRank).mockRejectedValueOnce(new Error("réplique indisponible"));
+    const res = mockResponse();
+
+    await setFeaturedProduct(mockRequest({ params: { id: oid().toString() }, body: { rank: 1 }, user: SELLER }), res);
+
+    expect(res.statusCode).toBe(500);
   });
 });

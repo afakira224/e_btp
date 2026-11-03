@@ -19,7 +19,8 @@ import { HttpError } from "../middlewares/error.middleware.js";
 import { getPaymentProvider } from "../payment/payment.provider.js";
 import { runInTransaction } from "../helpers/transaction.js";
 import { scheduleFor } from "../helpers/shopOrder.workflow.js";
-import { releaseCoupon, restoreStock } from "./shopOrder.service.js";
+import { releaseCoupon, releaseFlashUnits, restoreStock } from "./shopOrder.service.js";
+import { recordBoostSales } from "./boost.service.js";
 
 // ─────────────────────────────────────────────
 //  Paiement en ligne d'une commande.
@@ -48,11 +49,11 @@ const loadAwaitingOrder = async (orderId: Types.ObjectId | string, session: mong
   return order;
 };
 
-export const confirmOrderPayment = (
+export const confirmOrderPayment = async (
   orderId: Types.ObjectId | string,
   now = new Date()
-): Promise<PaymentSettlement> =>
-  runInTransaction(async (session) => {
+): Promise<PaymentSettlement> => {
+  const settlement = await runInTransaction(async (session): Promise<PaymentSettlement> => {
     const order = await loadAwaitingOrder(orderId, session);
     if (order.paymentStatus === OrderPaymentStatus.PAID) return { order, parts: [], changed: false };
     if (order.paymentStatus !== OrderPaymentStatus.PENDING) {
@@ -86,6 +87,14 @@ export const confirmOrderPayment = (
 
     return { order, parts, changed: true };
   });
+  // Payée en ligne, une commande compte pour ses boosts à la confirmation, pas au checkout.
+  if (settlement.changed) {
+    await recordBoostSales(settlement.order.items, now).catch((error: unknown) =>
+      logger.error(`Ventes des boosts non comptées : ${(error as Error).message}`)
+    );
+  }
+  return settlement;
+};
 
 export const failOrderPayment = (
   orderId: Types.ObjectId | string,
@@ -104,6 +113,7 @@ export const failOrderPayment = (
     for (const part of parts) {
       if (part.status !== ShopOrderStatus.AWAITING_PAYMENT) continue;
       await restoreStock(part.items, session);
+      await releaseFlashUnits(part.items, session, now);
       part.status = ShopOrderStatus.CANCELLED;
       part.payment.status = ShopOrderPaymentStatus.VOID;
       part.deadlineAt = null;

@@ -20,7 +20,7 @@ export const shopIdParam: ValidationChain[] = [param("id").isMongoId().withMessa
 export const shopPromotionForm: ValidationChain[] = [
   ...shopIdParam,
   body("type").isIn(SHOP_PROMOTION_TYPES).withMessage(`Type invalide. Valeurs acceptées : ${SHOP_PROMOTION_TYPES.join(", ")}.`),
-  body("nom").isString().trim().isLength({ min: 2, max: 80 }).withMessage("Le nom fait de 2 à 80 caractères."),
+  body("nom").isString().withMessage("Le nom fait de 2 à 80 caractères.").bail().trim().isLength({ min: 2, max: 80 }).withMessage("Le nom fait de 2 à 80 caractères."),
   body("description").optional().isString().trim().isLength({ max: 300 }).withMessage("300 caractères au plus."),
   body("discountType").optional().isIn(Object.values(DiscountType)).withMessage("Type de remise invalide."),
   body("discountValue").optional().isFloat({ min: 0 }).withMessage("Remise invalide.").toFloat(),
@@ -40,7 +40,7 @@ export const shopPromotionForm: ValidationChain[] = [
   body("tiers.*.minQuantity").optional().isInt({ min: 2 }).withMessage("Un palier commence à 2 unités au moins.").toInt(),
   body("tiers.*.discountValue").optional().isFloat({ min: 1, max: 70 }).withMessage("Remise d'un palier : 1 à 70 %.").toFloat(),
   body("flashQuantity").optional().isInt({ min: 1 }).withMessage("Quantité flash invalide.").toInt(),
-  body("confirmHighDiscount").optional().isBoolean().toBoolean(),
+  body("confirmHighDiscount").optional().isBoolean().withMessage("Confirmation : vrai ou faux.").toBoolean(),
   body("launch").optional().isIn(["now", "schedule", "draft"]).withMessage("Lancement : now, schedule ou draft."),
 ];
 
@@ -53,7 +53,7 @@ export const shopPromotionUpdateForm: ValidationChain[] = [
 export const promotionActionForm: ValidationChain[] = [
   param("id").isMongoId().withMessage("Promotion invalide."),
   body("endDate").optional().isISO8601().withMessage("Date de fin invalide."),
-  body("now").optional().isBoolean().toBoolean(),
+  body("now").optional().isBoolean().withMessage("Maintenant : vrai ou faux.").toBoolean(),
 ];
 
 // PATCH /product-boutiques/:id/featured
@@ -66,24 +66,24 @@ export const featuredForm: ValidationChain[] = [
 
 // POST /campaigns · PUT /campaigns/:id
 export const campaignForm: ValidationChain[] = [
-  body("nom").isString().trim().isLength({ min: 2, max: 80 }).withMessage("Le nom fait de 2 à 80 caractères."),
-  body("slug").optional().isString().trim().isLength({ max: 60 }),
-  body("description").optional().isString().trim().isLength({ max: 500 }),
+  body("nom").isString().withMessage("Le nom fait de 2 à 80 caractères.").bail().trim().isLength({ min: 2, max: 80 }).withMessage("Le nom fait de 2 à 80 caractères."),
+  body("slug").optional().isString().trim().isLength({ max: 60 }).withMessage("Adresse de la campagne : 60 caractères au plus."),
+  body("description").optional().isString().trim().isLength({ max: 500 }).withMessage("500 caractères au plus."),
   body("startDate").isISO8601().withMessage("Date de début invalide."),
   body("endDate").isISO8601().withMessage("Date de fin invalide."),
   body("minDiscount").isFloat({ min: 5, max: 70 }).withMessage("Remise minimale : 5 à 70 %.").toFloat(),
   ...mongoIds("familleIds", 20, "Familles"),
-  body("image").optional({ values: "null" }).isString(),
+  body("image").optional({ values: "null" }).isString().withMessage("Image invalide."),
 ];
 
 export const campaignUpdateForm: ValidationChain[] = [
   param("id").isMongoId().withMessage("Campagne invalide."),
-  body("nom").optional().isString().trim().isLength({ min: 2, max: 80 }),
-  body("description").optional().isString().trim().isLength({ max: 500 }),
-  body("startDate").optional().isISO8601(),
-  body("endDate").optional().isISO8601(),
-  body("minDiscount").optional().isFloat({ min: 5, max: 70 }).toFloat(),
-  body("actif").optional().isBoolean().toBoolean(),
+  body("nom").optional().isString().withMessage("Le nom fait de 2 à 80 caractères.").bail().trim().isLength({ min: 2, max: 80 }).withMessage("Le nom fait de 2 à 80 caractères."),
+  body("description").optional().isString().trim().isLength({ max: 500 }).withMessage("500 caractères au plus."),
+  body("startDate").optional().isISO8601().withMessage("Date de début invalide."),
+  body("endDate").optional().isISO8601().withMessage("Date de fin invalide."),
+  body("minDiscount").optional().isFloat({ min: 5, max: 70 }).withMessage("Remise minimale : 5 à 70 %.").toFloat(),
+  body("actif").optional().isBoolean().withMessage("Actif : vrai ou faux.").toBoolean(),
 ];
 
 export const campaignEntryForm: ValidationChain[] = [
@@ -92,7 +92,7 @@ export const campaignEntryForm: ValidationChain[] = [
   body("productBoutiqueIds").isArray({ min: 1, max: 50 }).withMessage("Choisissez de 1 à 50 offres."),
   body("productBoutiqueIds.*").isMongoId().withMessage("Offre invalide."),
   body("discountValue").isFloat({ min: 5, max: 70 }).withMessage("Remise : 5 à 70 %.").toFloat(),
-  body("confirmHighDiscount").optional().isBoolean().toBoolean(),
+  body("confirmHighDiscount").optional().isBoolean().withMessage("Confirmation : vrai ou faux.").toBoolean(),
 ];
 
 // POST /shops/:id/boosts · POST /shops/:id/boosts/estimate
@@ -104,12 +104,12 @@ export const boostForm: ValidationChain[] = [
   body("goal").optional().isIn(Object.values(BoostGoal)).withMessage("Objectif : visits ou views."),
   body("audience").optional().isObject().withMessage("Audience invalide."),
   body("audience.mode").optional().isIn(["auto", "custom"]).withMessage("Audience : auto ou custom."),
-  body("audience.communes").optional().isArray({ max: 20 }),
-  body("audience.villes").optional().isArray({ max: 20 }),
-  body("audience.customerTypes").optional().isArray({ max: 2 }),
-  body("audience.interestFamilleIds").optional().isArray({ max: 20 }),
-  body("audience.interestFamilleIds.*").optional().isMongoId(),
-  body("audience.relation").optional().isIn(Object.values(BoostRelation)),
+  body("audience.communes").optional().isArray({ max: 20 }).withMessage("Communes : 20 au plus."),
+  body("audience.villes").optional().isArray({ max: 20 }).withMessage("Villes : 20 au plus."),
+  body("audience.customerTypes").optional().isArray({ max: 2 }).withMessage("Types de clients invalides."),
+  body("audience.interestFamilleIds").optional().isArray({ max: 20 }).withMessage("Centres d'intérêt : 20 au plus."),
+  body("audience.interestFamilleIds.*").optional().isMongoId().withMessage("Centre d'intérêt invalide."),
+  body("audience.relation").optional().isIn(Object.values(BoostRelation)).withMessage("Relation : all, new ou returning."),
   body("dailyBudget").isInt({ min: 1 }).withMessage("Budget par jour invalide.").toInt(),
   body("days").isInt({ min: 1, max: 30 }).withMessage("Un boost dure de 1 à 30 jours.").toInt(),
 ];
@@ -128,8 +128,8 @@ export const sandboxCreditsForm: ValidationChain[] = [
 ];
 
 export const boostSettingsForm: ValidationChain[] = [
-  body("costPerVisit").optional().isInt({ min: 1 }).toInt(),
-  body("costPerThousandViews").optional().isInt({ min: 1 }).toInt(),
-  body("monthlyCredits").optional().isInt({ min: 0 }).toInt(),
-  body("minVisitsPerDay").optional().isInt({ min: 1, max: 1000 }).toInt(),
+  body("costPerVisit").optional().isInt({ min: 1 }).withMessage("Prix d'une visite invalide.").toInt(),
+  body("costPerThousandViews").optional().isInt({ min: 1 }).withMessage("Prix de 1 000 affichages invalide.").toInt(),
+  body("monthlyCredits").optional().isInt({ min: 0 }).withMessage("Crédits mensuels invalides.").toInt(),
+  body("minVisitsPerDay").optional().isInt({ min: 1, max: 1000 }).withMessage("Visites minimum par jour : 1 à 1 000.").toInt(),
 ];

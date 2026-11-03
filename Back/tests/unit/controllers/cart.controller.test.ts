@@ -24,6 +24,11 @@ vi.mock("../../../src/models/user.model.js", async () => {
   return { User: mockModel() };
 });
 
+// Statistiques des boosts : un ajout après une visite sponsorisée est compté.
+vi.mock("../../../src/shared/services/boost.service.js", () => ({
+  recordBoostCartAdd: vi.fn(async () => undefined),
+}));
+
 vi.mock("express-validator", async (importOriginal) => {
   const actual = await importOriginal<typeof import("express-validator")>();
   return {
@@ -37,6 +42,7 @@ import { Cart } from "../../../src/models/cart.model.js";
 import { Product, productBoutique } from "../../../src/models/product.model.js";
 import { Shop } from "../../../src/models/boutique.model.js";
 import { User } from "../../../src/models/user.model.js";
+import { recordBoostCartAdd } from "../../../src/shared/services/boost.service.js";
 import {
   addToCart,
   clearCart,
@@ -89,6 +95,7 @@ beforeEach(() => {
   ProductMock.find.mockReturnValue(mockQuery([]));
   UserMock.findById.mockReturnValue(mockQuery(null));
   ShopMock.findById.mockReturnValue(mockQuery(null));
+  vi.mocked(recordBoostCartAdd).mockResolvedValue(undefined);
 });
 
 // ─────────────────────────────────────────────
@@ -127,13 +134,14 @@ describe("getCart", () => {
       items: [],
       totalItems: 0,
       totalAmount: 0,
+      totalSavings: 0,
     });
     expect(CartMock).not.toHaveBeenCalled(); // aucun `new Cart(...)`
   });
 
   it("renvoie le panier enrichi des produits", async () => {
     const product = makeProduct({ name: "Galaxy A15" });
-    const pb = makeProductBoutique({ productId: product._id, stock: 5 });
+    const pb = makeProductBoutique({ productId: product._id, stock: 5, price: 1_000, discountPrice: null });
     const cart = makeCart({
       items: [makeCartItem({ productBoutiqueId: pb._id, quantity: 2, price: 1_000 })],
       amount: 2_000,
@@ -150,6 +158,23 @@ describe("getCart", () => {
     expect(res.body.data.totalItems).toBe(2);
     expect(res.body.data.totalAmount).toBe(2_000);
     expect(res.body.data.items[0].productName).toBe("Galaxy A15");
+  });
+
+  it("affiche le prix en vigueur quand une promotion a commencé depuis l'ajout", async () => {
+    const pb = makeProductBoutique({ stock: 5, price: 1_000, discountPrice: 800 });
+    const cart = makeCart({
+      items: [makeCartItem({ productBoutiqueId: pb._id, quantity: 2, price: 1_000 })],
+      amount: 2_000,
+    });
+    CartMock.findOne.mockReturnValue(mockQuery(cart));
+    PbMock.find.mockReturnValue(mockQuery([pb]));
+    const res = mockResponse();
+
+    await getCart(mockRequest({ params: { userId: cart.userId.toString() } }), res);
+
+    expect(res.body.data.items[0]).toMatchObject({ unitPrice: 800, addedUnitPrice: 1_000, priceChanged: true, savings: 400 });
+    expect(res.body.data.totalAmount).toBe(1_600);
+    expect(res.body.data.totalSavings).toBe(400);
   });
 
   it("n'interroge pas les produits quand le panier n'a aucune ligne", async () => {
@@ -377,6 +402,64 @@ describe("addToCart", () => {
     expect(cart.amount).toBe(4_000);
   });
 
+  it("applique le prix par quantité atteint par le cumul, jamais cumulé avec la remise", async () => {
+    // Remise à 900 ; dès 5 unités, −20 % du prix de base : 800.
+    const pb = makeProductBoutique({
+      price: 1_000,
+      discountPrice: 900,
+      quantityTiers: [{ minQuantity: 5, percent: 20 }],
+      stock: 10,
+    });
+    const cart = makeCart({
+      items: [makeCartItem({ productBoutiqueId: pb._id, quantity: 4, price: 900 })],
+      amount: 3_600,
+    });
+    setup({ pb, cart });
+
+    await addToCart(
+      mockRequest({
+        params: { userId: cart.userId.toString() },
+        body: { productBoutiqueId: pb._id.toString(), quantity: 1 },
+      }),
+      mockResponse()
+    );
+
+    expect(cart.items[0]!.quantity).toBe(5);
+    expect(cart.items[0]!.price).toBe(800);
+    expect(cart.amount).toBe(4_000);
+  });
+
+  it("compte l'ajout dans les statistiques du boost qui l'a amené", async () => {
+    const pb = makeProductBoutique({ stock: 10 });
+    const cart = makeCart({ items: [] });
+    setup({ pb, cart });
+    const res = mockResponse();
+
+    await addToCart(
+      mockRequest({ params: { userId: cart.userId.toString() }, body: { productBoutiqueId: pb._id.toString() } }),
+      res
+    );
+
+    expect(recordBoostCartAdd).toHaveBeenCalledWith(cart.userId.toString(), pb._id);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("ne fait pas échouer l'ajout quand le boost ne peut pas être compté", async () => {
+    const pb = makeProductBoutique({ stock: 10 });
+    const cart = makeCart({ items: [] });
+    setup({ pb, cart });
+    vi.mocked(recordBoostCartAdd).mockRejectedValueOnce(new Error("statistiques indisponibles"));
+    const res = mockResponse();
+
+    await addToCart(
+      mockRequest({ params: { userId: cart.userId.toString() }, body: { productBoutiqueId: pb._id.toString() } }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(session.commitTransaction).toHaveBeenCalled();
+  });
+
   it("refuse un ajout dépassant le stock disponible", async () => {
     const pb = makeProductBoutique({ stock: 3 });
     const cart = makeCart({ items: [] });
@@ -489,7 +572,7 @@ describe("updateCartItem", () => {
   });
 
   it("met à jour la quantité et recalcule le montant", async () => {
-    const pb = makeProductBoutique({ stock: 10 });
+    const pb = makeProductBoutique({ stock: 10, price: 500, discountPrice: null });
     const cart = makeCart({
       items: [makeCartItem({ productBoutiqueId: pb._id, quantity: 1, price: 500 })],
       amount: 500,
@@ -510,6 +593,30 @@ describe("updateCartItem", () => {
     expect(cart.items[0]!.quantity).toBe(4);
     expect(cart.amount).toBe(2_000);
     expect(res.statusCode).toBe(200);
+  });
+
+  it("rafraîchit le prix de la ligne quand la nouvelle quantité atteint un palier", async () => {
+    const pb = makeProductBoutique({ stock: 20, price: 1_000, discountPrice: null, quantityTiers: [{ minQuantity: 10, percent: 15 }] });
+    const cart = makeCart({
+      items: [makeCartItem({ productBoutiqueId: pb._id, quantity: 2, price: 1_000 })],
+      amount: 2_000,
+    });
+    CartMock.findOne.mockReturnValue(mockQuery(cart));
+    PbMock.findById.mockReturnValue(mockQuery(pb));
+    PbMock.find.mockReturnValue(mockQuery([pb]));
+    const res = mockResponse();
+
+    await updateCartItem(
+      mockRequest({
+        params: { userId: cart.userId.toString(), productBoutiqueId: pb._id.toString() },
+        body: { quantity: 10 },
+      }),
+      res
+    );
+
+    expect(cart.items[0]!.price).toBe(850);
+    expect(cart.amount).toBe(8_500);
+    expect(res.body.data.items[0].unitPrice).toBe(850);
   });
 
   it("retire l'article quand la quantité vaut 0", async () => {

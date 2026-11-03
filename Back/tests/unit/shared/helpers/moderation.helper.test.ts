@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isShopSuspended } from "../../../../src/shared/helpers/moderation.helper.js";
+import { arePromotionsBlocked, isShopSuspended } from "../../../../src/shared/helpers/moderation.helper.js";
 
 const NOW = new Date("2026-10-25T10:00:00.000Z");
 
@@ -22,5 +22,22 @@ describe("isShopSuspended", () => {
   it("compare à l'instant présent par défaut", () => {
     expect(isShopSuspended({ suspendedUntil: new Date(Date.now() + 60_000) })).toBe(true);
     expect(isShopSuspended({ suspendedUntil: new Date(Date.now() - 60_000) })).toBe(false);
+  });
+});
+
+describe("arePromotionsBlocked", () => {
+  it("laisse promouvoir une boutique jamais sanctionnée", () => {
+    expect(arePromotionsBlocked({ promotionsBlockedUntil: null }, NOW)).toBe(false);
+    expect(arePromotionsBlocked({}, NOW)).toBe(false);
+  });
+
+  it("bloque promotions et boosts jusqu'à l'échéance, et seulement jusque-là", () => {
+    expect(arePromotionsBlocked({ promotionsBlockedUntil: new Date(NOW.getTime() + 1) }, NOW)).toBe(true);
+    expect(arePromotionsBlocked({ promotionsBlockedUntil: NOW }, NOW)).toBe(false);
+    expect(arePromotionsBlocked({ promotionsBlockedUntil: new Date(NOW.getTime() - 1) }, NOW)).toBe(false);
+  });
+
+  it("compare à l'instant présent par défaut", () => {
+    expect(arePromotionsBlocked({ promotionsBlockedUntil: new Date(Date.now() + 60_000) })).toBe(true);
   });
 });

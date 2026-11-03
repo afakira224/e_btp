@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { Types } from "mongoose";
 import {
+  toOfferPricingDto,
   toProductBoutiqueResponseDto,
   toProductResponseDto,
 } from "../../../../src/shared/interfaces/product.interfaces.js";
@@ -12,6 +14,7 @@ import {
   makeProductBoutique,
   makeShop,
   makeSousCategorie,
+  oid,
 } from "../../../helpers/factories.js";
 
 describe("toProductResponseDto", () => {
@@ -118,5 +121,96 @@ describe("toProductBoutiqueResponseDto", () => {
     const dto = toProductBoutiqueResponseDto(pb, undefined, product, [famille]);
 
     expect(dto.product?.familles.map((f) => f.nom)).toEqual(["Électronique"]);
+  });
+});
+
+// ─────────────────────────────────────────────
+describe("toOfferPricingDto", () => {
+  const endsAt = new Date("2026-11-01T00:00:00.000Z");
+  const promo = (over: Record<string, unknown> = {}) => ({
+    promotionId: oid(),
+    type: "product_discount",
+    label: "Remise d'octobre",
+    endsAt,
+    referencePrice: 10_000,
+    percent: 20,
+    flash: false,
+    campaignId: null,
+    ...over,
+  });
+
+  it("donne le prix de base seul sans promotion", () => {
+    expect(toOfferPricingDto(makeProductBoutique({ price: 10_000, discountPrice: null, stock: 3 }))).toEqual({ basePrice: 10_000, price: 10_000, tiers: [] });
+  });
+
+  it("affiche le prix barré et la remise quand elle atteint 5 %", () => {
+    const current = promo();
+    const dto = toOfferPricingDto(makeProductBoutique({ price: 10_000, discountPrice: 8_000, stock: 3, promo: current }));
+
+    expect(dto).toEqual({
+      basePrice: 10_000,
+      price: 8_000,
+      referencePrice: 10_000,
+      percent: 20,
+      endsAt,
+      promotion: { id: String(current.promotionId), type: "product_discount", label: "Remise d'octobre", flash: false },
+      tiers: [],
+    });
+  });
+
+  it("garde le prix promotionnel mais cache le prix barré sous 5 % (faux prix barré)", () => {
+    const dto = toOfferPricingDto(makeProductBoutique({ price: 10_000, discountPrice: 8_000, stock: 3, promo: promo({ referencePrice: 8_200, percent: 0 }) }));
+
+    expect(dto.price).toBe(8_000);
+    expect(dto).not.toHaveProperty("referencePrice");
+    expect(dto).not.toHaveProperty("percent");
+    expect(dto.promotion).toBeDefined();
+  });
+
+  it("n'affiche plus « en promotion » une offre en rupture", () => {
+    const dto = toOfferPricingDto(makeProductBoutique({ price: 10_000, discountPrice: 8_000, stock: 0, promo: promo() }));
+
+    expect(dto).not.toHaveProperty("referencePrice");
+    expect(dto).not.toHaveProperty("percent");
+  });
+
+  it("signale une vente flash et sa campagne", () => {
+    const campaignId = new Types.ObjectId();
+    const dto = toOfferPricingDto(makeProductBoutique({ price: 10_000, discountPrice: 7_000, stock: 3, promo: promo({ type: "flash_sale", flash: true, campaignId }) }));
+
+    expect(dto.promotion).toMatchObject({ type: "flash_sale", flash: true, campaignId: String(campaignId) });
+  });
+
+  it("donne le prix unitaire de chaque palier, jamais plus cher que le prix promotionnel", () => {
+    const dto = toOfferPricingDto(
+      makeProductBoutique({
+        price: 10_000,
+        discountPrice: 8_500,
+        stock: 30,
+        quantityTiers: [
+          { minQuantity: 3, percent: 10 },
+          { minQuantity: 10, percent: 20 },
+        ],
+      })
+    );
+
+    expect(dto.tiers).toEqual([
+      { minQuantity: 3, percent: 10, unitPrice: 8_500 },
+      { minQuantity: 10, percent: 20, unitPrice: 8_000 },
+    ]);
+  });
+});
+
+describe("toProductBoutiqueResponseDto — prix et vitrine", () => {
+  it("ajoute le prix calculé et le rang de produit phare", () => {
+    const dto = toProductBoutiqueResponseDto(makeProductBoutique({ price: 10_000, discountPrice: null, featuredRank: 2 }));
+
+    expect(dto.pricing).toEqual({ basePrice: 10_000, price: 10_000, tiers: [] });
+    expect(dto.featuredRank).toBe(2);
+    expect(dto.discountPrice).toBeUndefined();
+  });
+
+  it("omet le rang d'une offre qui n'est pas produit phare", () => {
+    expect(toProductBoutiqueResponseDto(makeProductBoutique({ featuredRank: null }))).not.toHaveProperty("featuredRank");
   });
 });

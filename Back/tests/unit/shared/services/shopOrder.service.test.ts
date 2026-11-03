@@ -46,7 +46,7 @@ import {
   type IShopOrder,
 } from "../../../../src/models/shopOrder.model.js";
 import { productBoutique } from "../../../../src/models/product.model.js";
-import { Promotion } from "../../../../src/models/promotion.model.js";
+import { Promotion, PromotionStatus, PromotionType } from "../../../../src/models/promotion.model.js";
 import logger from "../../../../src/shared/logger/logger.js";
 import { HttpError } from "../../../../src/shared/middlewares/error.middleware.js";
 import { getPaymentProvider, type PaymentProvider } from "../../../../src/shared/payment/payment.provider.js";
@@ -54,6 +54,7 @@ import { ShopOrderAction, type ActionInput } from "../../../../src/shared/helper
 import {
   applyShopOrderAction,
   releaseCoupon,
+  releaseFlashUnits,
   restoreStock,
   settleProviderRefund,
   syncOrderStatus,
@@ -621,6 +622,47 @@ describe("restoreStock / releaseCoupon", () => {
 
     expect(promo.usedCount).toBe(0);
     expect(promo.save).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────
+describe("releaseFlashUnits", () => {
+  const flashSale = (over: Record<string, unknown> = {}) =>
+    makePromotion({ type: PromotionType.FLASH_SALE, flashQuantity: 10, flashSold: 10, status: PromotionStatus.ENDED, endDate: new Date(NOW.getTime() + 3600_000), ...over });
+
+  it("rend à la vente flash les unités des articles, et la rouvre si elle avait fini faute d'unités", async () => {
+    const flash = flashSale();
+    PromotionMock.findById.mockReturnValue(mockQuery(flash));
+
+    await releaseFlashUnits(
+      [makeOrderItem({ promotionId: flash._id, quantity: 2 }), makeOrderItem({ promotionId: flash._id, quantity: 1 })],
+      session as any,
+      NOW
+    );
+
+    expect(PromotionMock.findById).toHaveBeenCalledTimes(1);
+    expect(flash.flashSold).toBe(7);
+    expect(flash.status).toBe(PromotionStatus.ACTIVE);
+    expect(flash.save).toHaveBeenCalledWith({ session });
+  });
+
+  it("ne rouvre pas une vente flash dont la fin est passée", async () => {
+    const flash = flashSale({ endDate: new Date(NOW.getTime() - 1000) });
+    PromotionMock.findById.mockReturnValue(mockQuery(flash));
+
+    await releaseFlashUnits([makeOrderItem({ promotionId: flash._id, quantity: 2 })], session as any, NOW);
+
+    expect(flash.flashSold).toBe(8);
+    expect(flash.status).toBe(PromotionStatus.ENDED);
+  });
+
+  it("ignore les articles sans vente flash", async () => {
+    const discount = makePromotion({ type: PromotionType.PRODUCT_DISCOUNT, flashQuantity: null, flashSold: 0 });
+    PromotionMock.findById.mockReturnValue(mockQuery(discount));
+
+    await releaseFlashUnits([makeOrderItem({ promotionId: discount._id, quantity: 2 }), makeOrderItem({ promotionId: null })], session as any, NOW);
+
+    expect(discount.save).not.toHaveBeenCalled();
   });
 });
 

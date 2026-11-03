@@ -109,8 +109,23 @@ const setStock = (db: MockDb, offerId: string, next: (current: number) => number
   db.offerPatches[offerId] = { ...db.offerPatches[offerId], stock: next(live.stock), updatedAt: now };
 };
 
+/**
+ * Comme releaseFlashUnits du back : les unités vendues au prix flash d'articles
+ * qui ne seront pas livrés reviennent à leur vente flash, qui reprend si elle
+ * avait fini faute d'unités avant sa date de fin.
+ */
+const releaseFlashUnits = (db: MockDb, items: MockShopOrder["items"], now: string) => {
+  for (const item of items) {
+    const promo = item.promotionId ? db.marketing.promotions.find((candidate) => candidate.id === item.promotionId) : undefined;
+    if (!promo || promo.type !== "flash_sale" || promo.flashQuantity == null) continue;
+    promo.flashSold = Math.max(0, promo.flashSold - item.quantity);
+    if (promo.status === "ended" && promo.endDate > now && promo.flashSold < promo.flashQuantity) promo.status = "active";
+  }
+};
+
 const restoreStock = (db: MockDb, items: MockShopOrder["items"], now: string) => {
   for (const item of items) setStock(db, item.productBoutiqueId, (stock) => stock + item.quantity, now);
+  releaseFlashUnits(db, items, now);
 };
 
 // ── Statut de la commande ───────────────────
@@ -218,6 +233,7 @@ export const applyAction = (
   if (SHOP_ORDER_NEGATIVE_END.includes(to) && !SHOP_ORDER_NEGATIVE_END.includes(from)) {
     if (to === ShopOrderStatus.REFUSED && input.reason === "out_of_stock") {
       for (const item of part.items) setStock(db, item.productBoutiqueId, () => 0, stamp);
+      releaseFlashUnits(db, part.items, stamp);
     } else if (to !== ShopOrderStatus.RETURNED) {
       restoreStock(db, part.items, stamp);
     }

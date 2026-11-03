@@ -171,8 +171,9 @@ const refreshStatuses = (db: MockDb, now: Date): boolean => {
   let changed = false;
   for (const promo of db.marketing.promotions) {
     if (!promo.boutiqueId) continue;
-    const next = statusAt(ruleOf(promo), now);
-    if ((promo.status === "scheduled" || promo.status === "active") && next !== promo.status) {
+    // Comme runPromotionTick : une promotion en pause dont la fin est passée se termine aussi.
+    const next = promo.status === "paused" && new Date(promo.endDate) < now ? "ended" : statusAt(ruleOf(promo), now);
+    if ((promo.status === "scheduled" || promo.status === "active" || promo.status === "paused") && next !== promo.status) {
       promo.status = next;
       promo.updatedAt = now.toISOString();
       changed = true;
@@ -361,6 +362,9 @@ export const updateShopPromotion = (shopId: string, promotionId: string, body: P
   if (status !== "draft" && status !== "scheduled") throw new ApiError("Une promotion commencée ne se modifie plus : prolongez-la ou arrêtez-la.", 400);
   if (body.type !== promo.type) throw new ApiError("Le type d'une promotion ne change pas : créez-en une autre.", 400);
   const { start, end } = datesOf(body, now);
+  if (status === "scheduled" && start <= now && suspendedUntil(db, shop.id, now)) {
+    throw new ApiError("Votre boutique est suspendue : la promotion se lancera après la suspension.", 400);
+  }
   checkLaunchable(db, shop, body, start, end, now, promo.id);
   Object.assign(promo, fieldsOf(body, start, end ?? new Date(NO_END)), { updatedAt: now.toISOString() });
   if (status === "scheduled") promo.status = start <= now ? "active" : "scheduled";
@@ -422,6 +426,9 @@ export const promotionAction = (promotionId: string, action: string, body: { end
       break;
     case "resume":
       if (promotionsBlockedUntil(db, shop.id, now)) throw new ApiError("Les promotions de cette boutique sont suspendues par la modération.", 403);
+      if (new Date(promo.startDate) <= now && suspendedUntil(db, shop.id, now)) {
+        throw new ApiError("Votre boutique est suspendue : la promotion reprendra après la suspension.", 400);
+      }
       promo.status = new Date(promo.startDate) > now ? "scheduled" : "active";
       break;
     case "extend":
@@ -565,6 +572,24 @@ export const updateCampaign = (id: string, body: { nom?: string; description?: s
   const refusal = checkCampaign({ startDate: new Date(next.startDate), endDate: new Date(next.endDate), minDiscount: next.minDiscount });
   if (refusal) throw new ApiError(refusal, 400);
   Object.assign(campaign, next);
+  // Comme syncCampaignPromotions : les promotions inscrites suivent la campagne.
+  const now = new Date();
+  const closed = campaignState(campaign, now) === "ended";
+  for (const promo of db.marketing.promotions) {
+    if (promo.campaignId !== campaign.id || !["scheduled", "active", "paused"].includes(promo.status)) continue;
+    if (closed) {
+      Object.assign(promo, { status: "stopped", stoppedAt: now.toISOString(), stopReason: "La campagne de la plateforme est terminée." });
+    } else {
+      promo.endDate = campaign.endDate;
+      if (new Date(campaign.startDate) > now) {
+        promo.startDate = campaign.startDate;
+        if (promo.status === "active") promo.status = "scheduled";
+      } else if (promo.status === "scheduled") {
+        Object.assign(promo, { startDate: now.toISOString(), status: "active" });
+      }
+    }
+    promo.updatedAt = now.toISOString();
+  }
   writeDb(db);
   return ok(toCampaign(db, campaign), "Campagne modifiée.");
 };

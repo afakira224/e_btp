@@ -10,7 +10,7 @@ import {
   type IShopOrder,
 } from "../../models/shopOrder.model.js";
 import { productBoutique } from "../../models/product.model.js";
-import { Promotion } from "../../models/promotion.model.js";
+import { Promotion, PromotionStatus, PromotionType } from "../../models/promotion.model.js";
 import logger from "../logger/logger.js";
 import { HttpError } from "../middlewares/error.middleware.js";
 import { getPaymentProvider } from "../payment/payment.provider.js";
@@ -68,6 +68,28 @@ const markOutOfStock = async (items: readonly IOrderItem[], session: ClientSessi
       offer.stock = 0;
       await offer.save({ session });
     }
+  }
+};
+
+/**
+ * Rend à leur vente flash les unités d'articles qui ne seront pas livrés
+ * (paiement échoué, commande annulée ou refusée). Une vente flash terminée
+ * faute d'unités avant sa date de fin reprend ; le planificateur recalcule
+ * ensuite le prix de ses offres.
+ */
+export const releaseFlashUnits = async (items: readonly IOrderItem[], session: ClientSession, now = new Date()): Promise<void> => {
+  const units = new Map<string, number>();
+  for (const item of items) {
+    if (item.promotionId) units.set(String(item.promotionId), (units.get(String(item.promotionId)) ?? 0) + item.quantity);
+  }
+  for (const [promotionId, quantity] of units) {
+    const promo = await Promotion.findById(promotionId).session(session);
+    if (!promo || promo.type !== PromotionType.FLASH_SALE || promo.flashQuantity == null) continue;
+    promo.flashSold = Math.max(0, promo.flashSold - quantity);
+    if (promo.status === PromotionStatus.ENDED && promo.endDate > now && promo.flashSold < promo.flashQuantity) {
+      promo.status = PromotionStatus.ACTIVE;
+    }
+    await promo.save({ session });
   }
 };
 
@@ -228,6 +250,9 @@ export const applyShopOrderAction = async ({
       // juge s'il est revendable et corrige son stock elle-même.
       await restoreStock(part.items, session);
     }
+    // Les unités vendues au prix flash reviennent à la vente flash, sauf
+    // celles d'un produit livré puis retourné.
+    if (to !== ShopOrderStatus.RETURNED) await releaseFlashUnits(part.items, session, now);
 
     if (part.payment.status === ShopOrderPaymentStatus.PAID) {
       // Livraison abandonnée : la cause est celle constatée à l'échec, pas

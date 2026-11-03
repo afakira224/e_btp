@@ -256,20 +256,21 @@ export const settleSandboxCredits = async (req: Request, res: Response) => {
     const purchase = await CreditPurchase.findOne({ _id: String(req.params.purchaseId), boutiqueId: shop._id });
     if (!purchase) throw new HttpError("Recharge introuvable.", 404);
     if (purchase.status !== CreditPurchaseStatus.PENDING) throw new HttpError("Cette recharge est déjà réglée.", 409);
-    if (req.body.outcome === "paid") {
-      purchase.status = CreditPurchaseStatus.PAID;
-      purchase.paidAt = new Date();
-      await purchase.save();
+    // Écriture conditionnelle : deux règlements simultanés (double envoi,
+    // notification rejouée) ne créditent qu'une fois.
+    const paid = req.body.outcome === "paid";
+    const changes = paid ? { status: CreditPurchaseStatus.PAID, paidAt: new Date() } : { status: CreditPurchaseStatus.FAILED };
+    const written = await CreditPurchase.updateOne({ _id: purchase._id, status: CreditPurchaseStatus.PENDING }, { $set: changes });
+    if ((written as { modifiedCount?: number } | undefined)?.modifiedCount === 0) throw new HttpError("Cette recharge est déjà réglée.", 409);
+    Object.assign(purchase, changes);
+    if (paid) {
       await moveCredits(shop._id, purchase.amount, CreditReason.RECHARGE, "Recharge par mobile money", String(purchase._id));
       logger.info(`Recharge de ${purchase.amount} GNF pour ${shop.nom}`);
-    } else {
-      purchase.status = CreditPurchaseStatus.FAILED;
-      await purchase.save();
     }
     const fresh = await managedShop(req.user, String(req.params.id));
     const response = BaseResponse.WithSuccess(
       { purchaseId: String(purchase._id), status: purchase.status, balance: fresh.boostCredits ?? 0 },
-      purchase.status === CreditPurchaseStatus.PAID ? "Crédits ajoutés à votre portefeuille." : "Paiement refusé : aucun crédit ajouté."
+      paid ? "Crédits ajoutés à votre portefeuille." : "Paiement refusé : aucun crédit ajouté."
     );
     return res.status(response.statusCode).json(response);
   } catch (error) {

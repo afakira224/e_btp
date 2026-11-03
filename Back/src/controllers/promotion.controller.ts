@@ -16,7 +16,18 @@ import { isPromotionActive, toPromotionResponseDto } from "../shared/interfaces/
 import { productBoutique } from "../models/product.model.js";
 import { Shop } from "../models/boutique.model.js";
 import { unitPriceFor } from "../shared/helpers/promotion.rules.js";
-import { customerUsedCode, evaluateCoupon } from "../shared/services/pricing.service.js";
+import { customerUsedCode, evaluateCoupon, recomputeForPromotion } from "../shared/services/pricing.service.js";
+
+/**
+ * Après une écriture de l'administration, le prix affiché des offres visées
+ * suit (le checkout, lui, recalcule toujours). Une erreur ici ne défait pas
+ * l'écriture : le planificateur rattrapera au prochain passage de date.
+ */
+const refreshOfferPrices = async (...targets: Pick<IPromotion, "type" | "boutiqueId" | "productBoutiqueIds">[]): Promise<void> => {
+  for (const target of targets) {
+    await recomputeForPromotion(target).catch((error) => logger.error(`Prix non recalculés après une promotion : ${(error as Error).message}`));
+  }
+};
 
 const SHOP_PROMOTION_ELSEWHERE = "Une promotion de boutique se gère depuis l'espace de sa boutique.";
 
@@ -120,6 +131,7 @@ export const createPromotion = async (req: Request, res: Response) => {
     if (!promo) throw new Error("La création de la promotion a échoué.");
 
     await session.commitTransaction();
+    await refreshOfferPrices(promo);
 
     logger.info(`Promotion créée : ${promo._id}`);
 
@@ -249,6 +261,9 @@ export const updatePromotion = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Offres visées avant la modification : elles retrouvent leur prix si elles sortent de la promotion.
+    const previous = { type: promo.type, boutiqueId: promo.boutiqueId ?? null, productBoutiqueIds: [...promo.productBoutiqueIds] };
+
     if (nom !== undefined) promo.nom = nom;
     if (description !== undefined) promo.description = description;
     if (type !== undefined) promo.type = type;
@@ -304,6 +319,7 @@ export const updatePromotion = async (req: Request, res: Response) => {
 
     await promo.save({ session });
     await session.commitTransaction();
+    await refreshOfferPrices(previous, promo);
 
     const response = BaseResponse.WithSuccess(toPromotionResponseDto(promo), "Promotion mise à jour avec succès");
     return res.status(response.statusCode).json(response);
@@ -353,6 +369,7 @@ export const deletePromotion = async (req: Request, res: Response) => {
     promo.deletedAt = new Date();
     await promo.save({ session });
     await session.commitTransaction();
+    await refreshOfferPrices(promo);
 
     logger.info(`Promotion supprimée (soft) : ${id}`);
 

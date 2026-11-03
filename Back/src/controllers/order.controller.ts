@@ -108,6 +108,12 @@ const buildOrderDto = async (
   knownParts?: IShopOrder[]
 ): Promise<OrderResponseDto> => (await enrichOrders([order], viewer, knownParts))[0]!;
 
+/** Conflit d'écriture d'une transaction MongoDB (WriteConflict, erreur transitoire). */
+const isWriteConflict = (error: unknown): boolean => {
+  const candidate = error as { code?: number; hasErrorLabel?: (label: string) => boolean } | null;
+  return candidate?.code === 112 || candidate?.hasErrorLabel?.("TransientTransactionError") === true;
+};
+
 // ─────────────────────────────────────────────
 //  POST /orders/:userId   (checkout depuis le panier)
 //  { addressId?, deliveries?, deliveryMethod?, telephone?, adresse?, code?, paymentMethod? }
@@ -358,8 +364,19 @@ export const createOrder = async (req: Request, res: Response) => {
       const flashId = pricedLines[index]?.flashPromotionId;
       if (flashId) flashUnits.set(flashId, (flashUnits.get(flashId) ?? 0) + item.quantity);
     }
+    // Écriture conditionnelle : deux checkouts simultanés ne vendent pas plus
+    // d'unités que la vente flash n'en a.
     for (const [promotionId, units] of flashUnits) {
-      await Promotion.updateOne({ _id: promotionId }, { $inc: { flashSold: units } }, { session });
+      const written = await Promotion.updateOne(
+        { _id: promotionId, $or: [{ flashQuantity: null }, { $expr: { $lte: [{ $add: ["$flashSold", units] }, "$flashQuantity"] } }] },
+        { $inc: { flashSold: units } },
+        { session }
+      );
+      if ((written as { matchedCount?: number } | undefined)?.matchedCount === 0) {
+        await session.abortTransaction();
+        const response = BaseResponse.Conflict("La vente flash vient de s'épuiser : vérifiez votre panier.");
+        return res.status(response.statusCode).json(response);
+      }
     }
 
     const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -540,9 +557,12 @@ export const createOrder = async (req: Request, res: Response) => {
         logger.error(`Vente flash ${promotionId} non recalculée : ${(flashError as Error).message}`);
       }
     }
-    await recordBoostSales(orderItems, now).catch(boostError =>
-      logger.error(`Ventes des boosts non comptées : ${(boostError as Error).message}`)
-    );
+    // Payée en ligne, la commande compte pour ses boosts à la confirmation du paiement.
+    if (!online) {
+      await recordBoostSales(orderItems, now).catch(boostError =>
+        logger.error(`Ventes des boosts non comptées : ${(boostError as Error).message}`)
+      );
+    }
 
     // ── Paiement en ligne : lancement chez le prestataire ──
     // Hors transaction : la commande existe, le stock est réservé. Si le
@@ -610,6 +630,12 @@ export const createOrder = async (req: Request, res: Response) => {
     // alors plus rien à annuler.
     await session.abortTransaction().catch(() => undefined);
     logger.error(`Erreur création commande : ${(error as Error).message}`);
+    // Conflit d'écriture avec un autre checkout (même vente flash, même code) :
+    // rien n'est enregistré, le client peut simplement réessayer.
+    if (isWriteConflict(error)) {
+      const response = BaseResponse.Conflict("Une autre commande vient de passer sur ces articles : réessayez.");
+      return res.status(response.statusCode).json(response);
+    }
     const response = BaseResponse.ServerError((error as Error).message);
     return res.status(response.statusCode).json(response);
   } finally {

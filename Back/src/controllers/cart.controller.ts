@@ -49,7 +49,7 @@ export const getCart = async (req: Request, res: Response) => {
     if (!cart) {
       logger.info(`Panier vide pour utilisateur : ${userId}`);
       const response = BaseResponse.WithSuccess(
-        { id: null, userId, items: [], totalItems: 0, totalAmount: 0 },
+        { id: null, userId, items: [], totalItems: 0, totalAmount: 0, totalSavings: 0 },
         "Panier récupéré avec succès"
       );
       return res.status(response.statusCode).json(response);

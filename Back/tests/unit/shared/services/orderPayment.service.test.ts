@@ -31,6 +31,10 @@ vi.mock("../../../../src/models/promotion.model.js", async (importOriginal) => {
   return { ...actual, Promotion: mockModel() };
 });
 
+// Statistiques des boosts : testées dans boost.service.
+vi.mock("../../../../src/shared/services/boost.service.js", () => ({ recordBoostSales: vi.fn(async () => undefined) }));
+
+import { recordBoostSales } from "../../../../src/shared/services/boost.service.js";
 import {
   Order,
   OrderPaymentStatus,
@@ -65,6 +69,7 @@ import {
   makeProductBoutique,
   makePromotion,
   makeShopOrder,
+  makeShopPromotion,
   oid,
 } from "../../../helpers/factories.js";
 
@@ -160,6 +165,21 @@ describe("confirmOrderPayment", () => {
     expect(session.commitTransaction).toHaveBeenCalled();
     expect(session.abortTransaction).not.toHaveBeenCalled();
     expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it("compte la vente pour ses boosts à la confirmation, une seule fois", async () => {
+    const order = awaitingOrder();
+    givenOrder(order, [awaitingPart({ orderId: order._id })]);
+
+    await confirmOrderPayment(order._id, NOW);
+
+    expect(recordBoostSales).toHaveBeenCalledWith(order.items, NOW);
+
+    vi.mocked(recordBoostSales).mockClear();
+    const paid = awaitingOrder({ status: OrderStatus.IN_PROGRESS, paymentStatus: OrderPaymentStatus.PAID });
+    givenOrder(paid);
+    await confirmOrderPayment(paid._id, NOW);
+    expect(recordBoostSales).not.toHaveBeenCalled();
   });
 
   it("ne touche pas une sous-commande qui n'attend plus le paiement", async () => {
@@ -403,5 +423,33 @@ describe("refundLatePayment", () => {
     await expect(refundLatePayment(late)).resolves.toBe(false);
 
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(expect.stringContaining("prestataire indisponible"));
+  });
+});
+
+// ─────────────────────────────────────────────
+//  Régression corrigée (order.controller.ts, createOrder : `$inc: { flashSold }` ;
+//  orderPayment.service.ts, failOrderPayment) : le checkout décompte les
+//  unités vendues au prix flash, mais un paiement refusé ou expiré ne rend que
+//  le stock et le code promo. Les unités flash restent « vendues » : la vente
+//  flash peut se terminer (status ENDED après le checkout) sans avoir rien
+//  vendu. Ce test garde le correctif.
+// ─────────────────────────────────────────────
+describe("régressions — vente flash et paiement échoué", () => {
+  it("rend à la vente flash les unités d'une commande dont le paiement échoue", async () => {
+    const flash = makeShopPromotion({ type: "flash_sale", flashQuantity: 10, flashSold: 5 });
+    PromotionMock.findById.mockReturnValue(mockQuery(flash));
+    PromotionMock.findOne.mockReturnValue(mockQuery(flash));
+    const offer = makeProductBoutique({ stock: 4 });
+    PbMock.findById.mockReturnValue(mockQuery(offer));
+    const order = awaitingOrder();
+    givenOrder(order, [awaitingPart({ items: [makeOrderItem({ productBoutiqueId: offer._id, quantity: 3, promotionId: flash._id })] })]);
+
+    await failOrderPayment(order._id, "refused", NOW);
+
+    const released =
+      flash.flashSold === 2 ||
+      PromotionMock.updateOne.mock.calls.some(([, update]: any[]) => update?.$inc?.flashSold === -3) ||
+      PromotionMock.findOneAndUpdate.mock.calls.some(([, update]: any[]) => update?.$inc?.flashSold === -3);
+    expect(released).toBe(true);
   });
 });

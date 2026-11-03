@@ -84,6 +84,18 @@ vi.mock("../../../src/models/user.model.js", async (importOriginal) => {
   return { ...actual, User: mockModel() };
 });
 
+// Historique des prix : aucun prix plus bas sur 30 jours (prix de référence = prix courant).
+vi.mock("../../../src/models/priceHistory.model.js", async () => {
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { PriceHistory: mockModel() };
+});
+
+// Boosts : la visite qui a amené la vente et le décompte des ventes (testés dans boost.service).
+vi.mock("../../../src/shared/services/boost.service.js", () => ({
+  attributedBoost: vi.fn(async () => null),
+  recordBoostSales: vi.fn(async () => undefined),
+}));
+
 vi.mock("express-validator", async (importOriginal) => {
   const actual = await importOriginal<typeof import("express-validator")>();
   return {
@@ -107,7 +119,14 @@ import {
   restoreCartAfterFailedPayment,
 } from "../../../src/shared/services/orderPayment.service.js";
 import { deliverNotices } from "../../../src/shared/services/shopOrder.notifications.js";
-import { DiscountType, Promotion, PromotionScope } from "../../../src/models/promotion.model.js";
+import {
+  DiscountType,
+  Promotion,
+  PromotionScope,
+  PromotionStatus,
+  PromotionType,
+} from "../../../src/models/promotion.model.js";
+import { attributedBoost, recordBoostSales } from "../../../src/shared/services/boost.service.js";
 import { Cart } from "../../../src/models/cart.model.js";
 import { Product, productBoutique } from "../../../src/models/product.model.js";
 import { Shop } from "../../../src/models/boutique.model.js";
@@ -135,6 +154,7 @@ import {
   makeProductBoutique,
   makePromotion,
   makeShop,
+  makeShopPromotion,
   makeUser,
   oid,
 } from "../../helpers/factories.js";
@@ -189,6 +209,9 @@ beforeEach(() => {
     docs.map((doc) => ({ _id: oid(), createdAt: new Date(), updatedAt: new Date(), ...doc }))
   );
   vi.mocked(getPaymentProvider).mockReturnValue(null);
+  PromotionMock.find.mockReturnValue(mockQuery([]));
+  vi.mocked(attributedBoost).mockResolvedValue(null);
+  vi.mocked(recordBoostSales).mockResolvedValue(undefined);
 });
 
 /**
@@ -204,7 +227,8 @@ const setupCheckout = (
     delivery: { modes: [DeliveryMethod.PICKUP, DeliveryMethod.FLAT_RATE], flatRateFee: 25_000 },
   });
   const product = makeProduct({ name: "Galaxy A15" });
-  const pb = makeProductBoutique({ productId: product._id, boutiqueId: shop._id, stock });
+  // Le prix de l'offre est celui du panier : aucune promotion n'a commencé ni fini depuis l'ajout.
+  const pb = makeProductBoutique({ productId: product._id, boutiqueId: shop._id, stock, price, discountPrice: null });
   const item = makeCartItem({ productBoutiqueId: pb._id, quantity, price });
   const cart = makeCart({ items: [item], amount: price * quantity });
 
@@ -902,9 +926,12 @@ describe("createOrder — livraison par boutique", () => {
 
   /** Panier d'une ligne par offre : chaque offre a son prix et sa quantité. */
   const setupCart = (lines: { pb: Offer; price?: number; quantity?: number }[], shops: ShopDoc[]) => {
-    const items = lines.map(({ pb, price = 10_000, quantity = 1 }) =>
-      makeCartItem({ productBoutiqueId: pb._id, price, quantity })
-    );
+    const items = lines.map(({ pb, price = 10_000, quantity = 1 }) => {
+      // Prix de l'offre aligné sur celui du panier : aucun changement de prix depuis l'ajout.
+      pb.price = price;
+      pb.discountPrice = null;
+      return makeCartItem({ productBoutiqueId: pb._id, price, quantity });
+    });
     const cart = makeCart({ items, amount: items.reduce((sum, i) => sum + i.price * i.quantity, 0) });
     CartMock.findOne.mockReturnValue(mockQuery(cart));
     PbMock.find.mockReturnValue(mockQuery(lines.map((l) => l.pb)));
@@ -1108,8 +1135,8 @@ describe("createOrder — sous-commandes et paiement", () => {
       adresse: "Ratoma, Conakry",
       delivery: { modes: [DeliveryMethod.PICKUP], flatRateFee: null },
     });
-    const pbA = makeProductBoutique({ boutiqueId: depot._id, stock: 10 });
-    const pbB = makeProductBoutique({ boutiqueId: coloris._id, stock: 10 });
+    const pbA = makeProductBoutique({ boutiqueId: depot._id, stock: 10, price: 30_000, discountPrice: null });
+    const pbB = makeProductBoutique({ boutiqueId: coloris._id, stock: 10, price: 10_000, discountPrice: null });
     const items = [
       makeCartItem({ productBoutiqueId: pbA._id, price: 30_000, quantity: 1 }),
       makeCartItem({ productBoutiqueId: pbB._id, price: 10_000, quantity: 1 }),
@@ -1259,6 +1286,8 @@ describe("createOrder — sous-commandes et paiement", () => {
       // Les boutiques ne sont prévenues qu'au paiement confirmé.
       expect(deliverNotices).not.toHaveBeenCalled();
       expect(sendOrderConfirmationMail).not.toHaveBeenCalled();
+      // Les boosts ne comptent la vente qu'au paiement confirmé.
+      expect(recordBoostSales).not.toHaveBeenCalled();
     });
 
     it("annule la commande et restaure le panier quand le prestataire ne répond pas", async () => {
@@ -1274,6 +1303,398 @@ describe("createOrder — sous-commandes et paiement", () => {
       expect(res.statusCode).toBe(502);
       expect(failOrderPayment).toHaveBeenCalledWith(expect.anything(), "refused");
       expect(restoreCartAfterFailedPayment).toHaveBeenCalled();
+    });
+  });
+});
+
+// ─────────────────────────────────────────────
+//  Prix du moment : promotions, ventes flash, codes, livraison offerte, boosts
+// ─────────────────────────────────────────────
+describe("createOrder — prix et promotions", () => {
+  const userId = oid().toString();
+  const OPEN = { startDate: new Date("2000-01-01"), endDate: new Date("2999-01-01") };
+
+  /** Promotions lues par le moteur de prix (prix, paliers) et par la livraison offerte. */
+  const livePromotions = (prices: unknown[], freeShipping: unknown[] = []) =>
+    PromotionMock.find.mockImplementation((filter: { type?: unknown }) =>
+      mockQuery(filter.type === PromotionType.FREE_SHIPPING ? freeShipping : prices)
+    );
+
+  const run = async (body: Record<string, unknown> = checkout()) => {
+    const res = mockResponse();
+    await createOrder(mockRequest({ params: { userId }, body }), res);
+    return res;
+  };
+
+  describe("hausse et baisse de prix", () => {
+    it("refuse le checkout en 409 quand un prix a augmenté, et rafraîchit le panier", async () => {
+      // Ajouté au prix flash de 8 000 ; la vente flash est finie : 10 000.
+      const { cart, pb } = setupCheckout({ quantity: 2, price: 10_000 });
+      cart.items[0]!.price = 8_000;
+      cart.amount = 16_000;
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body.message).toBe("Le prix de « Galaxy A15 » a changé : vérifiez votre panier.");
+      expect(session.abortTransaction).toHaveBeenCalled();
+      expect(CartMock.updateOne).toHaveBeenCalledWith({ _id: cart._id }, { $set: { items: cart.items, amount: 20_000 } });
+      expect(cart.items[0]!.price).toBe(10_000);
+      expect(OrderMock.create).not.toHaveBeenCalled();
+      expect(pb.stock).toBe(10);
+    });
+
+    it("applique sans rien demander un prix qui a baissé, et le rattache à sa promotion", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      const promo = makeShopPromotion({ ...OPEN, nom: "Remise d'octobre", boutiqueId: shop._id, productBoutiqueIds: [pb._id], discountValue: 20 });
+      livePromotions([promo]);
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      const created = OrderMock.create.mock.calls[0]![0][0];
+      expect(created.items[0]).toMatchObject({
+        price: 8_000,
+        basePrice: 10_000,
+        promotionId: promo._id,
+        promotionLabel: "Remise d'octobre",
+      });
+      expect(created.subtotal).toBe(16_000);
+    });
+
+    it("ignore la remise d'une boutique sur l'offre d'une autre", async () => {
+      const { pb } = setupCheckout({ quantity: 1, price: 10_000 });
+      livePromotions([makeShopPromotion({ ...OPEN, boutiqueId: oid(), productBoutiqueIds: [pb._id], discountValue: 50 })]);
+
+      await run();
+
+      const created = OrderMock.create.mock.calls[0]![0][0];
+      expect(created.items[0].price).toBe(10_000);
+      expect(created.items[0].promotionId).toBeNull();
+    });
+
+    it("garde la meilleure remise, jamais leur somme", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 1, price: 10_000 });
+      const small = makeShopPromotion({ ...OPEN, boutiqueId: shop._id, productBoutiqueIds: [pb._id], discountValue: 10 });
+      const big = makeShopPromotion({ ...OPEN, boutiqueId: shop._id, productBoutiqueIds: [pb._id], discountValue: 25 });
+      livePromotions([small, big]);
+
+      await run();
+
+      const created = OrderMock.create.mock.calls[0]![0][0];
+      expect(created.items[0].price).toBe(7_500);
+      expect(created.items[0].promotionId).toBe(big._id);
+    });
+  });
+
+  describe("ventes flash", () => {
+    const flashSale = (over: Record<string, unknown>) =>
+      makeShopPromotion({ ...OPEN, type: PromotionType.FLASH_SALE, nom: "Flash du soir", discountValue: 30, flashQuantity: 10, ...over });
+
+    it("décompte la quantité vendue au prix flash dans la transaction", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 5 });
+      livePromotions([flash]);
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      expect(OrderMock.create.mock.calls[0]![0][0].items[0].price).toBe(7_000);
+      expect(PromotionMock.updateOne).toHaveBeenCalledWith(expect.objectContaining({ _id: String(flash._id) }), { $inc: { flashSold: 2 } }, { session });
+    });
+
+    it("refuse en 409 quand un autre checkout vient d'épuiser la vente flash", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 5 });
+      livePromotions([flash]);
+      PromotionMock.updateOne.mockReturnValueOnce(mockQuery({ matchedCount: 0, modifiedCount: 0 }));
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body.message).toBe("La vente flash vient de s'épuiser : vérifiez votre panier.");
+      const [filter] = PromotionMock.updateOne.mock.calls[0]!;
+      expect(filter.$or).toEqual([{ flashQuantity: null }, { $expr: { $lte: [{ $add: ["$flashSold", 2] }, "$flashQuantity"] } }]);
+      expect(session.abortTransaction).toHaveBeenCalled();
+      expect(OrderMock.create).not.toHaveBeenCalled();
+    });
+
+    it("répond 409 « réessayez » à un conflit d'écriture avec un autre checkout", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 5 });
+      livePromotions([flash]);
+      const conflict = Object.assign(new Error("WriteConflict"), { code: 112 });
+      PromotionMock.updateOne.mockImplementationOnce(() => {
+        throw conflict;
+      });
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body.message).toBe("Une autre commande vient de passer sur ces articles : réessayez.");
+    });
+
+    it("termine la vente flash dont la quantité est vendue, après la transaction", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 8 });
+      livePromotions([flash]);
+      const soldOut = flashSale({ _id: flash._id, boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 10 });
+      PromotionMock.findById.mockReturnValueOnce(mockQuery(soldOut));
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      expect(PromotionMock.findById).toHaveBeenCalledWith(String(flash._id));
+      expect(soldOut.status).toBe(PromotionStatus.ENDED);
+      expect(soldOut.save).toHaveBeenCalled();
+      expect(session.commitTransaction.mock.invocationCallOrder[0]!).toBeLessThan(
+        (soldOut.save as any).mock.invocationCallOrder[0]!
+      );
+    });
+
+    it("laisse en cours une vente flash dont il reste des unités", async () => {
+      const { pb, shop } = setupCheckout({ quantity: 1, price: 10_000 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 2 });
+      livePromotions([flash]);
+      const after = flashSale({ _id: flash._id, boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 3 });
+      PromotionMock.findById.mockReturnValueOnce(mockQuery(after));
+
+      await run();
+
+      expect(after.status).toBe(PromotionStatus.ACTIVE);
+      expect(after.save).not.toHaveBeenCalled();
+    });
+
+    it("retombe sur la meilleure autre remise quand la quantité flash ne suffit plus", async () => {
+      // Il reste 1 unité flash pour 2 demandées : la remise produit de 10 % s'applique.
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 9_000 });
+      pb.price = 10_000;
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pb._id], flashSold: 9 });
+      const discount = makeShopPromotion({ ...OPEN, boutiqueId: shop._id, productBoutiqueIds: [pb._id], discountValue: 10 });
+      livePromotions([flash, discount]);
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      const item = OrderMock.create.mock.calls[0]![0][0].items[0];
+      expect(item.price).toBe(9_000);
+      expect(item.promotionId).toBe(discount._id);
+      expect(PromotionMock.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("partage la quantité flash entre deux lignes du même panier", async () => {
+      // 3 unités flash restantes : la première ligne (2) les prend, la seconde (2) paie le prix normal.
+      const shop = makeShop({ delivery: { modes: [DeliveryMethod.FLAT_RATE], flatRateFee: 25_000 } });
+      const pbA = makeProductBoutique({ boutiqueId: shop._id, price: 10_000, discountPrice: null, stock: 10 });
+      const pbB = makeProductBoutique({ boutiqueId: shop._id, price: 10_000, discountPrice: null, stock: 10 });
+      const flash = flashSale({ boutiqueId: shop._id, productBoutiqueIds: [pbA._id, pbB._id], flashSold: 7 });
+      CartMock.findOne.mockReturnValue(
+        mockQuery(
+          makeCart({
+            items: [
+              makeCartItem({ productBoutiqueId: pbA._id, quantity: 2, price: 7_000 }),
+              makeCartItem({ productBoutiqueId: pbB._id, quantity: 2, price: 10_000 }),
+            ],
+          })
+        )
+      );
+      PbMock.find.mockReturnValue(mockQuery([pbA, pbB]));
+      ShopMock.find.mockReturnValue(mockQuery([shop]));
+      livePromotions([flash]);
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      const items = OrderMock.create.mock.calls[0]![0][0].items;
+      expect(items.map((item: any) => item.price)).toEqual([7_000, 10_000]);
+      expect(PromotionMock.updateOne).toHaveBeenCalledWith(expect.objectContaining({ _id: String(flash._id) }), { $inc: { flashSold: 2 } }, { session });
+    });
+  });
+
+  describe("codes promo", () => {
+    /** Panier sur deux boutiques : Dépôt Matam (30 000, livraison 50 000) et Coloris (10 000, retrait). */
+    const setupTwoShops = () => {
+      const depot = makeShop({ nom: "Dépôt Matam", delivery: { modes: [DeliveryMethod.FLAT_RATE], flatRateFee: 50_000 } });
+      const coloris = makeShop({ nom: "Coloris", delivery: { modes: [DeliveryMethod.PICKUP], flatRateFee: null } });
+      const pbA = makeProductBoutique({ boutiqueId: depot._id, stock: 10, price: 30_000, discountPrice: null });
+      const pbB = makeProductBoutique({ boutiqueId: coloris._id, stock: 10, price: 10_000, discountPrice: null });
+      CartMock.findOne.mockReturnValue(
+        mockQuery(
+          makeCart({
+            items: [
+              makeCartItem({ productBoutiqueId: pbA._id, price: 30_000, quantity: 1 }),
+              makeCartItem({ productBoutiqueId: pbB._id, price: 10_000, quantity: 1 }),
+            ],
+          })
+        )
+      );
+      PbMock.find.mockReturnValue(mockQuery([pbA, pbB]));
+      ShopMock.find.mockReturnValue(mockQuery([depot, coloris]));
+      return { depot, coloris, pbA, pbB };
+    };
+    const body = (code: string) => checkout({ deliveryMethod: undefined, code });
+
+    const shopCode = (boutiqueId: unknown, over: Record<string, unknown> = {}) =>
+      makeShopPromotion({
+        ...OPEN,
+        type: PromotionType.COUPON,
+        scope: PromotionScope.CART,
+        code: "COLORIS10",
+        discountValue: 10,
+        productBoutiqueIds: [],
+        perCustomerLimit: 1,
+        boutiqueId,
+        ...over,
+      });
+
+    it("met toute la remise d'un code de boutique sur sa part, sans rien à la charge de la plateforme", async () => {
+      const { coloris } = setupTwoShops();
+      PromotionMock.findOne.mockReturnValue(mockQuery(shopCode(coloris._id)));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.statusCode).toBe(201);
+      const order = OrderMock.create.mock.calls[0]![0][0];
+      expect(order.discountAmount).toBe(1_000); // 10 % des 10 000 de Coloris, pas des 40 000
+      const [a, b] = createdParts();
+      expect(a).toMatchObject({ discountAmount: 0, platformDiscount: 0, amount: 80_000 });
+      expect(b).toMatchObject({ discountAmount: 1_000, platformDiscount: 0, amount: 9_000 });
+    });
+
+    it("répartit un code de la plateforme au prorata et le met à sa charge", async () => {
+      setupTwoShops();
+      PromotionMock.findOne.mockReturnValue(
+        mockQuery(makePromotion({ ...OPEN, code: "MOINS4000", discountType: DiscountType.FIXED, discountValue: 4_000 }))
+      );
+
+      await run(body("MOINS4000"));
+
+      const [a, b] = createdParts();
+      expect(a).toMatchObject({ discountAmount: 3_000, platformDiscount: 3_000 });
+      expect(b).toMatchObject({ discountAmount: 1_000, platformDiscount: 1_000 });
+    });
+
+    it("refuse un code de boutique sans article de cette boutique", async () => {
+      setupTwoShops();
+      PromotionMock.findOne.mockReturnValue(mockQuery(shopCode(oid())));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe("Ce code ne vaut que chez la boutique qui l'a créé : ajoutez un de ses articles.");
+      expect(OrderMock.create).not.toHaveBeenCalled();
+    });
+
+    it("refuse un code non cumulable quand tous les articles de la boutique sont déjà en promotion", async () => {
+      const { coloris, pbB } = setupTwoShops();
+      livePromotions([makeShopPromotion({ ...OPEN, boutiqueId: coloris._id, productBoutiqueIds: [pbB._id], discountValue: 10 })]);
+      // Le panier a vu la baisse : 9 000.
+      const cart = await (CartMock.findOne() as Promise<any>);
+      cart.items[1].price = 9_000;
+      PromotionMock.findOne.mockReturnValue(mockQuery(shopCode(coloris._id, { stackable: false })));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe("Aucun article de la commande n'est éligible à ce coupon.");
+    });
+
+    it("refuse un code déjà utilisé par ce client", async () => {
+      const { coloris } = setupTwoShops();
+      PromotionMock.findOne.mockReturnValue(mockQuery(shopCode(coloris._id)));
+      OrderMock.countDocuments.mockReturnValueOnce(mockQuery(1));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe("Vous avez déjà utilisé ce code.");
+      const filter = OrderMock.countDocuments.mock.calls[0]![0];
+      expect(String(filter.userId)).toBe(userId);
+      expect(filter).toMatchObject({ promotionCode: "COLORIS10", status: { $nin: [OrderStatus.CANCELLED, OrderStatus.PAYMENT_FAILED] } });
+      expect(session.abortTransaction).toHaveBeenCalled();
+    });
+
+    it("dit combien de fois un code s'utilise quand la limite par client dépasse 1", async () => {
+      const { coloris } = setupTwoShops();
+      PromotionMock.findOne.mockReturnValue(mockQuery(shopCode(coloris._id, { perCustomerLimit: 3 })));
+      OrderMock.countDocuments.mockReturnValueOnce(mockQuery(3));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.body.message).toBe("Ce code s'utilise 3 fois par client.");
+    });
+
+    it("accepte le code tant que la limite par client n'est pas atteinte", async () => {
+      const { coloris } = setupTwoShops();
+      const promo = shopCode(coloris._id, { perCustomerLimit: 3 });
+      PromotionMock.findOne.mockReturnValue(mockQuery(promo));
+      OrderMock.countDocuments.mockReturnValueOnce(mockQuery(2));
+
+      const res = await run(body("COLORIS10"));
+
+      expect(res.statusCode).toBe(201);
+      expect(promo.usedCount).toBe(1);
+    });
+  });
+
+  describe("livraison offerte", () => {
+    const freeFrom = (boutiqueId: unknown, minAmount: number) =>
+      makeShopPromotion({ ...OPEN, type: PromotionType.FREE_SHIPPING, scope: PromotionScope.CART, nom: "Livraison offerte", minAmount, boutiqueId, productBoutiqueIds: [] });
+
+    it("offre la livraison quand la part de la boutique atteint le seuil", async () => {
+      const { shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      livePromotions([], [freeFrom(shop._id, 20_000)]);
+
+      await run();
+
+      const order = OrderMock.create.mock.calls[0]![0][0];
+      expect(order.shippingFee).toBe(0);
+      expect(order.amount).toBe(20_000);
+      expect(createdParts()[0].deliveryFee).toBe(0);
+    });
+
+    it("garde les frais sous le seuil", async () => {
+      const { shop } = setupCheckout({ quantity: 1, price: 10_000 });
+      livePromotions([], [freeFrom(shop._id, 20_000)]);
+
+      await run();
+
+      expect(OrderMock.create.mock.calls[0]![0][0].shippingFee).toBe(25_000);
+    });
+
+    it("lit le seuil sur le prix remisé de la part", async () => {
+      // 2 × 10 000 remisés de 20 % : 16 000, sous le seuil de 20 000.
+      const { pb, shop } = setupCheckout({ quantity: 2, price: 10_000 });
+      livePromotions([makeShopPromotion({ ...OPEN, boutiqueId: shop._id, productBoutiqueIds: [pb._id], discountValue: 20 })], [freeFrom(shop._id, 20_000)]);
+
+      await run();
+
+      expect(OrderMock.create.mock.calls[0]![0][0].shippingFee).toBe(25_000);
+    });
+  });
+
+  describe("boosts", () => {
+    it("rattache chaque ligne au boost dont une visite a précédé l'achat, puis compte la vente", async () => {
+      const { pb } = setupCheckout({ quantity: 2, price: 10_000 });
+      const boostId = oid();
+      vi.mocked(attributedBoost).mockResolvedValueOnce(boostId);
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
+      expect(attributedBoost).toHaveBeenCalledWith(userId, pb._id, expect.any(Date), session);
+      const items = OrderMock.create.mock.calls[0]![0][0].items;
+      expect(items[0].boostId).toBe(boostId);
+      expect(recordBoostSales).toHaveBeenCalledWith(items, expect.any(Date));
+    });
+
+    it("ne fait pas échouer la commande quand la vente ne peut pas être comptée", async () => {
+      setupCheckout();
+      vi.mocked(recordBoostSales).mockRejectedValueOnce(new Error("statistiques indisponibles"));
+
+      const res = await run();
+
+      expect(res.statusCode).toBe(201);
     });
   });
 });

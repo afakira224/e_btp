@@ -234,6 +234,10 @@ export const updateShopPromotion = async (user: AuthUser | undefined, promotionI
   if (status !== S.DRAFT && status !== S.SCHEDULED) throw new HttpError("Une promotion commencée ne se modifie plus : prolongez-la ou arrêtez-la.", 400);
   if (body.type !== promo.type) throw new HttpError("Le type d'une promotion ne change pas : créez-en une autre.", 400);
   const { start, end } = datesOf(body, now);
+  // Comme la création et le lancement : une boutique suspendue ne met rien en ligne.
+  if (status === S.SCHEDULED && start <= now && isShopSuspended(shop, now)) {
+    throw new HttpError("Votre boutique est suspendue : la promotion se lancera après la suspension.", 400);
+  }
   await checkLaunchable(shop, body, start, end, now, promo._id);
   const previous = { type: promo.type, boutiqueId: promo.boutiqueId ?? null, productBoutiqueIds: [...promo.productBoutiqueIds] };
   promo.set(fieldsOf(body, start, end ?? NO_END));
@@ -289,6 +293,9 @@ export const applyPromotionAction = async (
       break;
     case PromotionAction.RESUME:
       if (arePromotionsBlocked(shop, now)) throw new HttpError("Les promotions de cette boutique sont suspendues par la modération.", 403);
+      if (promo.startDate <= now && isShopSuspended(shop, now)) {
+        throw new HttpError("Votre boutique est suspendue : la promotion reprendra après la suspension.", 400);
+      }
       promo.status = promo.startDate > now ? S.SCHEDULED : S.ACTIVE;
       break;
     case PromotionAction.EXTEND:
@@ -422,6 +429,35 @@ export const checkCampaignInput = (input: { startDate: Date; endDate: Date; minD
 
 export const campaignState = (campaign: Pick<ICampaign, "actif" | "startDate" | "endDate">, now: Date): "upcoming" | "running" | "ended" =>
   !campaign.actif || now > campaign.endDate ? "ended" : now < campaign.startDate ? "upcoming" : "running";
+
+/**
+ * Après une modification de la campagne par l'administration, ses promotions
+ * suivent : closes avec elle, ou alignées sur ses nouvelles dates. Les prix
+ * des offres concernées sont recalculés.
+ */
+export const syncCampaignPromotions = async (campaign: ICampaign, now = new Date()): Promise<number> => {
+  const promos = await Promotion.find({ campaignId: campaign._id, status: { $in: [S.SCHEDULED, S.ACTIVE, S.PAUSED] } });
+  const closed = campaignState(campaign, now) === "ended";
+  for (const promo of promos) {
+    if (closed) {
+      promo.status = S.STOPPED;
+      promo.stoppedAt = now;
+      promo.stopReason = "La campagne de la plateforme est terminée.";
+    } else {
+      promo.endDate = campaign.endDate;
+      if (campaign.startDate > now) {
+        promo.startDate = campaign.startDate;
+        if (promo.status === S.ACTIVE) promo.status = S.SCHEDULED;
+      } else if (promo.status === S.SCHEDULED) {
+        promo.startDate = now;
+        promo.status = S.ACTIVE;
+      }
+    }
+    await promo.save();
+    await recomputeForPromotion(promo, now);
+  }
+  return promos.length;
+};
 
 /**
  * Offres inscrites à des campagnes, par campagne : celles d'une remise de la

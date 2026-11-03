@@ -364,6 +364,7 @@ export const createBoost = async (user: AuthUser | undefined, shopId: string, in
   const reserved = Math.round(input.dailyBudget * input.days);
   const boostId = new Types.ObjectId();
   await moveCredits(shop._id, -reserved, CreditReason.BOOST_RESERVE, `Boost de ${input.days} jour${input.days > 1 ? "s" : ""}`, String(boostId));
+  // Le budget est réservé avant l'écriture du boost : si elle échoue, il est rendu.
   const boost = await Boost.create({
     _id: boostId,
     boutiqueId: shop._id,
@@ -381,20 +382,35 @@ export const createBoost = async (user: AuthUser | undefined, shopId: string, in
     endDate,
     status: BoostStatus.ACTIVE,
     createdBy: user?.id ? oid(user.id) : null,
+  }).catch(async (error: unknown) => {
+    await moveCredits(shop._id, reserved, CreditReason.BOOST_REFUND, "Boost non lancé : budget rendu", String(boostId)).catch((refundError: unknown) =>
+      logger.error(`Budget du boost ${String(boostId)} non rendu : ${(refundError as Error).message}`)
+    );
+    throw error;
   });
   logger.info(`Boost ${String(boost._id)} lancé par ${shop.nom} : ${reserved} GNF sur ${input.days} jour(s)`);
   return boost;
 };
 
-/** Termine un boost et rend le budget non dépensé. */
+/**
+ * Termine un boost et rend le budget non dépensé. Le passage à « terminé » se
+ * fait par une écriture conditionnelle : deux arrêts simultanés (un clic
+ * pendant le tour du planificateur, un double clic) ne rendent le budget
+ * qu'une fois.
+ */
 export const finishBoost = async (boost: IBoost, status: BoostStatus.ENDED | BoostStatus.STOPPED, reason: string, now = new Date()): Promise<IBoost> => {
   if (boost.status === BoostStatus.ENDED || boost.status === BoostStatus.STOPPED) return boost;
   const refund = Math.max(0, Math.round(boost.reserved - boost.spent));
+  // Seul le premier arrêt passe : les dépenses, elles, ne s'écrivent que sur un boost en cours.
+  const written = await Boost.updateOne(
+    { _id: boost._id, status: { $in: [BoostStatus.ACTIVE, BoostStatus.PAUSED] } },
+    { $set: { status, stopReason: reason, endedAt: now, refunded: refund } }
+  );
+  if ((written as { modifiedCount?: number } | undefined)?.modifiedCount === 0) return boost;
   boost.status = status;
   boost.stopReason = reason;
   boost.endedAt = now;
   boost.refunded = refund;
-  await boost.save();
   if (refund > 0) await moveCredits(boost.boutiqueId, refund, CreditReason.BOOST_REFUND, "Budget de boost non dépensé", String(boost._id));
   audienceCache.delete(String(boost._id));
   return boost;
@@ -635,7 +651,7 @@ export const sponsoredOffers = async (context: SponsoredContext, now = new Date(
     const firstToday = exposure?.count === 1;
     const cost = boost.goal === BoostGoal.VIEWS ? Math.min(boost.costPerThousandViews / 1000, boost.reserved - boost.spent) : 0;
     await BoostStat.updateOne({ boostId: boost._id, day }, { $inc: { impressions: 1, reach: firstToday ? 1 : 0, spent: cost } }, { upsert: true });
-    if (cost > 0) await Boost.updateOne({ _id: boost._id }, { $inc: { spent: cost } });
+    if (cost > 0) await Boost.updateOne({ _id: boost._id, status: BoostStatus.ACTIVE }, { $inc: { spent: cost } });
   }
   return chosen;
 };
@@ -671,7 +687,7 @@ export const recordBoostVisit = async (
   }
   const cost = boost.goal === BoostGoal.VISITS ? Math.min(boost.costPerVisit, Math.max(0, boost.reserved - boost.spent)) : 0;
   await BoostStat.updateOne({ boostId: boost._id, day }, { $inc: { visits: 1, spent: cost } }, { upsert: true });
-  if (cost > 0) await Boost.updateOne({ _id: boost._id }, { $inc: { spent: cost } });
+  if (cost > 0) await Boost.updateOne({ _id: boost._id, status: BoostStatus.ACTIVE }, { $inc: { spent: cost } });
   return true;
 };
 

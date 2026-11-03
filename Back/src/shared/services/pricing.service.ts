@@ -353,8 +353,10 @@ export const runPromotionTick = async (since: Date, now = new Date()): Promise<P
     promo.status = now > promo.endDate ? S.ENDED : S.ACTIVE;
     await promo.save();
   }
+  // Une promotion en pause dont la fin est passée se termine aussi : sinon elle
+  // resterait « en cours » et compterait dans le plafond de la boutique.
   const ended = await Promotion.find({
-    status: S.ACTIVE,
+    status: { $in: [S.ACTIVE, S.PAUSED] },
     $or: [{ endDate: { $lt: now } }, { $expr: { $and: [{ $ne: ["$flashQuantity", null] }, { $gte: ["$flashSold", "$flashQuantity"] }] } }],
   });
   for (const promo of ended) {
@@ -362,9 +364,14 @@ export const runPromotionTick = async (since: Date, now = new Date()): Promise<P
     await promo.save();
   }
   // Dates franchies depuis le dernier tour, toutes promotions confondues.
+  // Une vente flash modifiée depuis (unités rendues, reprise) est recalculée aussi.
   const crossed = await Promotion.find({
     type: { $in: [...PRICE_TYPES, T.QUANTITY_TIERS] },
-    $or: [{ startDate: { $gt: since, $lte: now } }, { endDate: { $gte: since, $lt: now } }],
+    $or: [
+      { startDate: { $gt: since, $lte: now } },
+      { endDate: { $gte: since, $lt: now } },
+      { type: T.FLASH_SALE, updatedAt: { $gt: since, $lte: now } },
+    ],
   });
 
   const touched = new Map<string, IPromotion>();

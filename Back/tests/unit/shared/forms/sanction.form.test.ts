@@ -32,7 +32,7 @@ describe("createSanctionForm", () => {
     });
 
     expect(errors).toEqual([
-      "Mesure invalide. Valeurs acceptées : hide, warning, suspension, block.",
+      "Mesure invalide. Valeurs acceptées : hide, warning, suspension, block, promo_ban.",
       "Cible invalide. Valeurs acceptées : offer, review, shop, user.",
       "Cible invalide.",
     ]);

@@ -79,6 +79,10 @@ describe("motifs et types", () => {
     }
   });
 
+  it("permet de signaler un faux prix barré sur une annonce", () => {
+    expect(SUPPORT_REASONS[T.LISTING_REPORT]).toMatchObject({ fake_discount: "Faux prix barré" });
+  });
+
   it("reprend pour un retour exactement les motifs de la sous-commande", () => {
     expect(SUPPORT_REASONS[T.RETURN]).toEqual(RETURN_REASONS);
   });

@@ -13,6 +13,23 @@ vi.mock("../../../src/models/cart.model.js", async () => {
   return { Cart: mockModel() };
 });
 
+// Prix du moment des offres du panier, boutique d'un code, codes déjà utilisés par le client.
+vi.mock("../../../src/models/product.model.js", async () => {
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { Product: mockModel(), productBoutique: mockModel() };
+});
+
+vi.mock("../../../src/models/boutique.model.js", async () => {
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { Shop: mockModel() };
+});
+
+vi.mock("../../../src/models/order.model.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/models/order.model.js")>();
+  const { mockModel } = await import("../../helpers/model.mock.js");
+  return { ...actual, Order: mockModel() };
+});
+
 vi.mock("express-validator", async (importOriginal) => {
   const actual = await importOriginal<typeof import("express-validator")>();
   return {
@@ -26,9 +43,13 @@ import {
   DiscountType,
   Promotion,
   PromotionScope,
+  PromotionStatus,
   PromotionType,
 } from "../../../src/models/promotion.model.js";
 import { Cart } from "../../../src/models/cart.model.js";
+import { productBoutique } from "../../../src/models/product.model.js";
+import { Shop } from "../../../src/models/boutique.model.js";
+import { Order } from "../../../src/models/order.model.js";
 import {
   applyCoupon,
   createPromotion,
@@ -40,10 +61,38 @@ import {
 } from "../../../src/controllers/promotion.controller.js";
 import { mockQuery } from "../../helpers/model.mock.js";
 import { mockRequest, mockResponse, mockSession } from "../../helpers/express.mock.js";
-import { makeCart, makeCartItem, makePromotion, oid } from "../../helpers/factories.js";
+import {
+  makeCart,
+  makeCartItem,
+  makeProductBoutique,
+  makePromotion,
+  makeShop,
+  makeShopPromotion,
+  oid,
+} from "../../helpers/factories.js";
 
 const PromotionMock = Promotion as unknown as Record<string, any>;
 const CartMock = Cart as unknown as Record<string, any>;
+const PbMock = productBoutique as unknown as Record<string, any>;
+const ShopMock = Shop as unknown as Record<string, any>;
+const OrderMock = Order as unknown as Record<string, any>;
+
+/**
+ * Panier dont chaque ligne pointe sur une offre au même prix (aucune
+ * promotion depuis l'ajout) ; les offres sont rendues par productBoutique.find.
+ */
+const cartOf = (lines: { price: number; quantity: number; boutiqueId?: unknown; discountPrice?: number | null }[]) => {
+  const offers = lines.map((line) =>
+    makeProductBoutique({ price: line.price, discountPrice: line.discountPrice ?? null, ...(line.boutiqueId ? { boutiqueId: line.boutiqueId } : {}) })
+  );
+  const cart = makeCart({
+    items: lines.map((line, index) => makeCartItem({ productBoutiqueId: offers[index]!._id, quantity: line.quantity, price: line.price })),
+    amount: lines.reduce((sum, line) => sum + line.price * line.quantity, 0),
+  });
+  CartMock.findOne.mockReturnValue(mockQuery(cart));
+  PbMock.find.mockReturnValue(mockQuery(offers));
+  return { cart, offers };
+};
 
 let session: ReturnType<typeof mockSession>;
 
@@ -77,6 +126,10 @@ beforeEach(() => {
   PromotionMock.countDocuments.mockReturnValue(mockQuery(0));
   PromotionMock.create.mockImplementation(async (docs: any[]) => [makePromotion(docs[0])]);
   CartMock.findOne.mockReturnValue(mockQuery(null));
+  PbMock.find.mockReturnValue(mockQuery([]));
+  ShopMock.find.mockReturnValue(mockQuery([]));
+  ShopMock.findById.mockReturnValue(mockQuery(null));
+  OrderMock.countDocuments.mockReturnValue(mockQuery(0));
 });
 
 // ─────────────────────────────────────────────
@@ -232,6 +285,7 @@ describe("getPromotions", () => {
     );
 
     expect(PromotionMock.find).toHaveBeenCalledWith({
+      boutiqueId: null,
       type: PromotionType.COUPON,
       scope: PromotionScope.CART,
     });
@@ -239,10 +293,17 @@ describe("getPromotions", () => {
 
   it("convertit le filtre actif en booléen", async () => {
     await getPromotions(mockRequest({ query: { actif: "true" } }), mockResponse());
-    expect(PromotionMock.find).toHaveBeenLastCalledWith({ actif: true });
+    expect(PromotionMock.find).toHaveBeenLastCalledWith({ boutiqueId: null, actif: true });
 
     await getPromotions(mockRequest({ query: { actif: "false" } }), mockResponse());
-    expect(PromotionMock.find).toHaveBeenLastCalledWith({ actif: false });
+    expect(PromotionMock.find).toHaveBeenLastCalledWith({ boutiqueId: null, actif: false });
+  });
+
+  it("ne liste jamais les promotions des boutiques (ni leurs codes)", async () => {
+    await getPromotions(mockRequest(), mockResponse());
+
+    expect(PromotionMock.find).toHaveBeenCalledWith({ boutiqueId: null });
+    expect(PromotionMock.countDocuments).toHaveBeenCalledWith({ boutiqueId: null });
   });
 
   it("ne conserve que les promotions actives avec activeNow=true", async () => {
@@ -303,6 +364,48 @@ describe("getPromotionById", () => {
 });
 
 // ─────────────────────────────────────────────
+describe("getPromotionById — promotion de boutique", () => {
+  it("renvoie 404 pour une promotion de boutique, lue depuis l'espace de sa boutique", async () => {
+    PromotionMock.findById.mockReturnValue(mockQuery(makeShopPromotion()));
+    const res = mockResponse();
+
+    await getPromotionById(mockRequest({ params: { id: oid().toString() } }), res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.message).toBe("Promotion non trouvée");
+  });
+});
+
+describe("updatePromotion — promotion de boutique", () => {
+  it("refuse en 403 de modifier la promotion d'une boutique", async () => {
+    const promo = makeShopPromotion({ nom: "Remise d'octobre" });
+    PromotionMock.findById.mockReturnValue(mockQuery(promo));
+    const res = mockResponse();
+
+    await updatePromotion(mockRequest({ params: { id: promo._id.toString() }, body: { nom: "Changée" } }), res);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body.message).toBe("Une promotion de boutique se gère depuis l'espace de sa boutique.");
+    expect(promo.nom).toBe("Remise d'octobre");
+    expect(promo.save).not.toHaveBeenCalled();
+    expect(session.abortTransaction).toHaveBeenCalled();
+  });
+});
+
+describe("deletePromotion — promotion de boutique", () => {
+  it("refuse en 403 de supprimer la promotion d'une boutique", async () => {
+    const promo = makeShopPromotion();
+    PromotionMock.findById.mockReturnValue(mockQuery(promo));
+    const res = mockResponse();
+
+    await deletePromotion(mockRequest({ params: { id: promo._id.toString() } }), res);
+
+    expect(res.statusCode).toBe(403);
+    expect(promo.deletedAt).toBeNull();
+    expect(session.abortTransaction).toHaveBeenCalled();
+  });
+});
+
 describe("updatePromotion", () => {
   it("renvoie 404 quand la promotion n'existe pas", async () => {
     PromotionMock.findById.mockReturnValue(mockQuery(null));
@@ -495,27 +598,41 @@ describe("applyCoupon", () => {
     expect(PromotionMock.findOne).toHaveBeenCalledWith({ code: "RENTREE10" });
   });
 
-  it("renvoie 400 quand le coupon est expiré", async () => {
-    PromotionMock.findOne.mockReturnValue(
-      mockQuery(activePromo({ endDate: new Date("2001-01-01") }))
-    );
+  it("renvoie 400 quand le coupon est en pause", async () => {
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ status: PromotionStatus.PAUSED })));
+    cartOf([{ quantity: 1, price: 10_000 }]);
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
 
     expect(res.statusCode).toBe(400);
-    expect(res.body.message).toContain("n'est pas valide");
+    expect(res.body.message).toBe("Ce coupon n'est pas valide (inactif, expiré ou épuisé).");
+  });
+
+  it("renvoie 400 quand le coupon est expiré", async () => {
+    PromotionMock.findOne.mockReturnValue(
+      mockQuery(activePromo({ endDate: new Date("2001-01-01") }))
+    );
+    cartOf([{ quantity: 1, price: 10_000 }]);
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Ce coupon n'est pas valide (inactif, expiré ou épuisé).");
   });
 
   it("renvoie 400 quand la limite d'utilisation est atteinte", async () => {
     PromotionMock.findOne.mockReturnValue(
       mockQuery(activePromo({ usageLimit: 2, usedCount: 2 }))
     );
+    cartOf([{ quantity: 1, price: 10_000 }]);
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
 
     expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Ce coupon n'est pas valide (inactif, expiré ou épuisé).");
   });
 
   it("renvoie 400 quand le panier est vide", async () => {
@@ -531,9 +648,7 @@ describe("applyCoupon", () => {
 
   it("renvoie 400 quand le montant minimum n'est pas atteint", async () => {
     PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ minAmount: 50_000 })));
-    CartMock.findOne.mockReturnValue(
-      mockQuery(makeCart({ items: [makeCartItem({ quantity: 1, price: 10_000 })], amount: 10_000 }))
-    );
+    cartOf([{ quantity: 1, price: 10_000 }]);
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
@@ -543,12 +658,8 @@ describe("applyCoupon", () => {
   });
 
   it("calcule la réduction sur un panier éligible sans modifier le panier", async () => {
-    const cart = makeCart({
-      items: [makeCartItem({ quantity: 2, price: 10_000 })],
-      amount: 20_000,
-    });
+    const { cart } = cartOf([{ quantity: 2, price: 10_000 }]);
     PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ discountValue: 10 })));
-    CartMock.findOne.mockReturnValue(mockQuery(cart));
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
@@ -565,9 +676,7 @@ describe("applyCoupon", () => {
     PromotionMock.findOne.mockReturnValue(
       mockQuery(activePromo({ discountValue: 50, maxDiscount: 5_000 }))
     );
-    CartMock.findOne.mockReturnValue(
-      mockQuery(makeCart({ items: [makeCartItem({ quantity: 1, price: 20_000 })], amount: 20_000 }))
-    );
+    cartOf([{ quantity: 1, price: 20_000 }]);
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
@@ -585,36 +694,117 @@ describe("applyCoupon", () => {
         })
       )
     );
-    CartMock.findOne.mockReturnValue(
-      mockQuery(makeCart({ items: [makeCartItem({ quantity: 1, price: 10_000 })], amount: 10_000 }))
-    );
+    cartOf([{ quantity: 1, price: 10_000 }]);
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
 
     expect(res.statusCode).toBe(400);
-    expect(res.body.message).toBe("Aucun article du panier n'est éligible à ce coupon.");
+    expect(res.body.message).toBe("Aucun article de la commande n'est éligible à ce coupon.");
   });
 
   it("applique la réduction aux seules lignes ciblées", async () => {
-    const cible = makeCartItem({ quantity: 1, price: 10_000 });
-    const autre = makeCartItem({ quantity: 1, price: 30_000 });
+    const { offers } = cartOf([
+      { quantity: 1, price: 10_000 },
+      { quantity: 1, price: 30_000 },
+    ]);
     PromotionMock.findOne.mockReturnValue(
       mockQuery(
         activePromo({
           scope: PromotionScope.PRODUCT_BOUTIQUE,
-          productBoutiqueIds: [cible.productBoutiqueId],
+          productBoutiqueIds: [offers[0]!._id],
           discountValue: 20,
         })
       )
     );
-    CartMock.findOne.mockReturnValue(mockQuery(makeCart({ items: [cible, autre], amount: 40_000 })));
     const res = mockResponse();
 
     await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
 
     expect(res.body.data.discountAmount).toBe(2_000); // 20 % de 10 000
     expect(res.body.data.totalAfter).toBe(38_000);
+  });
+
+  it("calcule la réduction aux prix du moment, pas au montant enregistré du panier", async () => {
+    // Une remise a fait passer l'offre de 10 000 à 8 000 depuis l'ajout.
+    const { cart } = cartOf([{ quantity: 2, price: 10_000, discountPrice: 8_000 }]);
+    cart.amount = 20_000;
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ discountValue: 10 })));
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
+
+    expect(res.body.data.totalBefore).toBe(16_000);
+    expect(res.body.data.discountAmount).toBe(1_600);
+  });
+
+  it("ne fait porter un code de boutique que sur ses articles, et nomme la boutique", async () => {
+    const coloris = makeShop({ nom: "Coloris" });
+    cartOf([
+      { quantity: 1, price: 30_000 },
+      { quantity: 1, price: 10_000, boutiqueId: coloris._id },
+    ]);
+    PromotionMock.findOne.mockReturnValue(
+      mockQuery(activePromo({ boutiqueId: coloris._id, discountValue: 10, perCustomerLimit: 1 }))
+    );
+    ShopMock.findById.mockReturnValue(mockQuery(coloris));
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.discountAmount).toBe(1_000);
+    expect(res.body.data.totalBefore).toBe(40_000);
+    expect(res.body.data.totalAfter).toBe(39_000);
+    expect(res.body.data.boutique).toEqual({ id: String(coloris._id), nom: "Coloris" });
+  });
+
+  it("refuse un code de boutique quand le panier n'a aucun de ses articles", async () => {
+    cartOf([{ quantity: 1, price: 30_000 }]);
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ boutiqueId: oid() })));
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Ce code ne vaut que chez la boutique qui l'a créé : ajoutez un de ses articles.");
+  });
+
+  it("exclut les articles déjà en promotion d'un code non cumulable", async () => {
+    const shopId = oid();
+    cartOf([
+      { quantity: 1, price: 10_000, discountPrice: 9_000, boutiqueId: shopId },
+      { quantity: 1, price: 20_000, boutiqueId: shopId },
+    ]);
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ boutiqueId: shopId, discountValue: 10, stackable: false })));
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), res);
+
+    expect(res.body.data.discountAmount).toBe(2_000); // 10 % des seuls 20 000 sans promotion
+  });
+
+  it("refuse un code déjà utilisé autant de fois que permis par client", async () => {
+    const userId = oid().toString();
+    cartOf([{ quantity: 1, price: 30_000 }]);
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo({ perCustomerLimit: 1 })));
+    OrderMock.countDocuments.mockReturnValueOnce(mockQuery(1));
+    const res = mockResponse();
+
+    await applyCoupon(mockRequest({ body: { userId, code: "RENTREE10" } }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toBe("Vous avez déjà utilisé ce code.");
+    expect(String(OrderMock.countDocuments.mock.calls[0]![0].userId)).toBe(userId);
+  });
+
+  it("ne compte pas les utilisations d'un code sans limite par client", async () => {
+    cartOf([{ quantity: 1, price: 30_000 }]);
+    PromotionMock.findOne.mockReturnValue(mockQuery(activePromo()));
+
+    await applyCoupon(mockRequest({ body: { userId: oid().toString(), code: "RENTREE10" } }), mockResponse());
+
+    expect(OrderMock.countDocuments).not.toHaveBeenCalled();
   });
 
   it("renvoie 500 en cas d'erreur", async () => {
@@ -650,13 +840,73 @@ describe("getActiveFlashSales", () => {
 
     await getActiveFlashSales(mockRequest(), res);
 
-    expect(PromotionMock.find).toHaveBeenCalledWith({
+    const filter = PromotionMock.find.mock.calls[0]![0];
+    expect(filter).toMatchObject({
       type: PromotionType.FLASH_SALE,
       actif: true,
+      status: { $nin: [PromotionStatus.DRAFT, PromotionStatus.PAUSED, PromotionStatus.STOPPED] },
     });
+    expect(filter.startDate.$lte).toBeInstanceOf(Date);
+    expect(filter.endDate.$gte).toBeInstanceOf(Date);
     expect(query.sort).toHaveBeenCalledWith({ endDate: 1 });
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].nom).toBe("Flash en cours");
+  });
+
+  it("montre la vente flash d'une boutique avec son nom et ce qu'il en reste, jamais un code", async () => {
+    const shop = makeShop({ nom: "Coloris" });
+    const flash = makeShopPromotion({
+      nom: "Flash peinture",
+      type: PromotionType.FLASH_SALE,
+      boutiqueId: shop._id,
+      code: "SECRET",
+      flashQuantity: 10,
+      flashSold: 7,
+      startDate: new Date("2000-01-01"),
+      endDate: new Date("2999-01-01"),
+    });
+    PromotionMock.find.mockReturnValue(mockQuery([flash]));
+    ShopMock.find.mockReturnValue(mockQuery([shop]));
+    const res = mockResponse();
+
+    await getActiveFlashSales(mockRequest(), res);
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).toMatchObject({
+      nom: "Flash peinture",
+      code: null,
+      boutique: { id: String(shop._id), nom: "Coloris" },
+      flashLeft: 3,
+    });
+  });
+
+  it("écarte une vente flash dont toute la quantité est vendue", async () => {
+    const flash = makeShopPromotion({
+      type: PromotionType.FLASH_SALE,
+      flashQuantity: 5,
+      flashSold: 5,
+      startDate: new Date("2000-01-01"),
+      endDate: new Date("2999-01-01"),
+    });
+    PromotionMock.find.mockReturnValue(mockQuery([flash]));
+
+    const res = mockResponse();
+    await getActiveFlashSales(mockRequest(), res);
+
+    expect(res.body.data).toEqual([]);
+  });
+
+  it("n'ajoute ni boutique ni reste à une vente flash de la plateforme sans quantité", async () => {
+    PromotionMock.find.mockReturnValue(
+      mockQuery([makePromotion({ type: PromotionType.FLASH_SALE, startDate: new Date("2000-01-01"), endDate: new Date("2999-01-01") })])
+    );
+    const res = mockResponse();
+
+    await getActiveFlashSales(mockRequest(), res);
+
+    expect(res.body.data[0]).not.toHaveProperty("boutique");
+    expect(res.body.data[0]).not.toHaveProperty("flashLeft");
+    expect(res.body.data[0].code).toBeNull();
   });
 
   it("renvoie une liste vide quand aucune vente flash n'est active", async () => {
@@ -678,5 +928,47 @@ describe("getActiveFlashSales", () => {
     await getActiveFlashSales(mockRequest(), res);
 
     expect(res.statusCode).toBe(500);
+  });
+});
+
+// ─────────────────────────────────────────────
+//  Régression corrigée (promotion.controller.ts, createPromotion / updatePromotion /
+//  deletePromotion) : une remise ou une vente flash de la plateforme change le
+//  prix au checkout (priceLines lit les promotions en vigueur), mais aucune de
+//  ces écritures n'appelle recomputeForPromotion. Le prix affiché des offres
+//  (discountPrice, promo) reste celui d'avant jusqu'à un passage de date ou un
+//  redémarrage : le panier montre un prix, le checkout en facture un autre
+//  (409 après une suppression). Ces tests gardent le
+// correctif.
+// ─────────────────────────────────────────────
+describe("régressions — prix des offres après une écriture de l'administration", () => {
+  it("recalcule le prix des offres visées par une vente flash de la plateforme créée en cours", async () => {
+    const offerId = oid().toString();
+
+    await createPromotion(
+      mockRequest({
+        body: {
+          nom: "Flash de la plateforme",
+          type: PromotionType.FLASH_SALE,
+          scope: PromotionScope.PRODUCT_BOUTIQUE,
+          discountValue: 30,
+          startDate: new Date(Date.now() - 3600_000).toISOString(),
+          endDate: new Date(Date.now() + 3600_000).toISOString(),
+          productBoutiqueIds: [offerId],
+        },
+      }),
+      mockResponse()
+    );
+
+    expect(PbMock.find).toHaveBeenCalledWith(expect.objectContaining({ _id: { $in: [expect.anything()] } }));
+  });
+
+  it("rend leur prix aux offres d'une vente flash de la plateforme supprimée", async () => {
+    const promo = makePromotion({ type: PromotionType.FLASH_SALE, scope: PromotionScope.PRODUCT_BOUTIQUE, productBoutiqueIds: [oid()], code: null });
+    PromotionMock.findById.mockReturnValue(mockQuery(promo));
+
+    await deletePromotion(mockRequest({ params: { id: promo._id.toString() } }), mockResponse());
+
+    expect(PbMock.find).toHaveBeenCalled();
   });
 });
