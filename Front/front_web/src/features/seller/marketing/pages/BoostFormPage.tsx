@@ -156,7 +156,7 @@ export const BoostFormPage = () => {
       </Link>
       {data.data.blocked ? <Alert tone="danger">Les promotions et boosts de cette boutique sont suspendus par la modération.</Alert> : null}
 
-      <div className={styles.grid2} style={{ gridTemplateColumns: "minmax(0, 2fr) minmax(260px, 1fr)" }}>
+      <div className={styles.boostLayout}>
         <div className={styles.form}>
           <Choices
             legend="Que voulez-vous booster ?"

@@ -425,6 +425,23 @@ a.stat:hover {
   gap: var(--space-3);
 }
 
+.boostLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .boostLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sticky {
+    position: static;
+  }
+}
+
 @media (max-width: 640px) {
   .card {
     padding: var(--space-3);
