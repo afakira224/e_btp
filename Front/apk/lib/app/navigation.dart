@@ -23,7 +23,9 @@ extension NavigationX on BuildContext {
   /// Pousse un écran partagé sous l'onglet courant : `openShared('produits/x')`.
   void openShared(String subPath) => push('/$currentTab/$subPath');
 
-  void openOffer(String id) => openShared('produits/${Uri.encodeComponent(id)}');
+  /// `src` : la place d'où vient la visite (`boost:<id>` pour une place sponsorisée).
+  void openOffer(String id, {String? src}) => openShared('produits/${Uri.encodeComponent(id)}${src == null ? '' : '?src=${Uri.encodeQueryComponent(src)}'}');
+  void openCampaign(String slug) => openShared('campagnes/${Uri.encodeComponent(slug)}');
   void openShop(String id) => openShared('boutique/${Uri.encodeComponent(id)}');
   void openFamille(String id) => openShared('familles/${Uri.encodeComponent(id)}');
   void openCategorie(String id) => openShared('categories/${Uri.encodeComponent(id)}');

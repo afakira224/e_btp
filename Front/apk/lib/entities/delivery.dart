@@ -38,6 +38,18 @@ class DeliveryOption {
   final double fee;
 }
 
+/// Livraison offerte par la boutique dès un montant : appliquée, ou ce qu'il reste à ajouter.
+class FreeShipping {
+  const FreeShipping({required this.threshold, required this.applied, required this.remaining, required this.label});
+
+  final double threshold;
+  final bool applied;
+  final double remaining;
+  final String label;
+
+  factory FreeShipping.fromJson(Json j) => FreeShipping(threshold: number(j, 'threshold'), applied: boolean(j, 'applied'), remaining: number(j, 'remaining'), label: str(j, 'label'));
+}
+
 /// La livraison d'une boutique : ses articles et les modes qu'ils acceptent tous.
 class DeliveryGroupQuote {
   const DeliveryGroupQuote({
@@ -49,6 +61,7 @@ class DeliveryGroupQuote {
     this.selectedMethod,
     this.fee,
     this.error,
+    this.freeShipping,
   });
 
   final String boutiqueId;
@@ -64,19 +77,23 @@ class DeliveryGroupQuote {
   /// Ce qui empêche cette livraison de partir.
   final String? error;
 
+  /// Promotion « livraison offerte » de la boutique, quand elle en a une.
+  final FreeShipping? freeShipping;
+
   factory DeliveryGroupQuote.fromJson(Json j) => DeliveryGroupQuote(
-        boutiqueId: str(j, 'boutiqueId'),
-        boutiqueNom: strOrNull(j, 'boutiqueNom'),
-        pickupAdresse: strOrNull(j, 'pickupAdresse'),
-        productBoutiqueIds: objects(j, 'items').map((i) => str(i, 'productBoutiqueId')).toList(),
-        options: [
-          for (final o in objects(j, 'options'))
-            if (DeliveryMode.tryParse(strOrNull(o, 'method')) case final method?) DeliveryOption(method: method, fee: number(o, 'fee')),
-        ],
-        selectedMethod: DeliveryMode.tryParse(strOrNull(j, 'selectedMethod')),
-        fee: numOrNull(j, 'fee'),
-        error: strOrNull(j, 'error'),
-      );
+    boutiqueId: str(j, 'boutiqueId'),
+    boutiqueNom: strOrNull(j, 'boutiqueNom'),
+    pickupAdresse: strOrNull(j, 'pickupAdresse'),
+    productBoutiqueIds: objects(j, 'items').map((i) => str(i, 'productBoutiqueId')).toList(),
+    options: [
+      for (final o in objects(j, 'options'))
+        if (DeliveryMode.tryParse(strOrNull(o, 'method')) case final method?) DeliveryOption(method: method, fee: number(o, 'fee')),
+    ],
+    selectedMethod: DeliveryMode.tryParse(strOrNull(j, 'selectedMethod')),
+    fee: numOrNull(j, 'fee'),
+    error: strOrNull(j, 'error'),
+    freeShipping: object(j, 'freeShipping') == null ? null : FreeShipping.fromJson(object(j, 'freeShipping')!),
+  );
 }
 
 class DeliveryQuote {

@@ -1,31 +1,76 @@
 import 'dart:convert';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
+import '../../../entities/order.dart';
+import '../../../entities/shop_request.dart';
+import '../../../entities/support.dart';
+import '../../config/env.dart';
+import '../../utils/format.dart';
 import '../api_client.dart';
 import '../api_exception.dart';
 import 'mock_db.dart';
 import 'mock_seed.dart';
+
+part 'mock_marketing.dart';
+part 'mock_orders.dart';
+part 'mock_support.dart';
 
 // ─────────────────────────────────────────────
 //  Client simulé.
 //
 //  Même interface que HttpApiClient, mêmes routes, mêmes codes HTTP, même
 //  enveloppe et mêmes messages que le back — portage du mock du front web
-//  (mockClient.ts, cartWishlist.ts, account.ts). Passer au vrai serveur se
-//  fait avec --dart-define=USE_MOCK=false, sans toucher une feature.
+//  (mockClient.ts, cartWishlist.ts, account.ts, orders.ts, support.ts,
+//  marketing.ts). Passer au vrai serveur se fait avec
+//  --dart-define=USE_MOCK=false, sans toucher une feature.
 // ─────────────────────────────────────────────
 
 typedef J = Map<String, dynamic>;
 
 class MockApiClient implements ApiClient {
-  MockApiClient._(this._seed, this._db);
+  MockApiClient._(this._seed, this._db) {
+    final now = DateTime.now();
+    _promotions = _buildPromotions(now);
+    _campaigns = _buildCampaigns(now);
+    _boosts = _buildBoosts(now);
+  }
 
   final MockSeed _seed;
   final MockDb _db;
 
+  /// Promotions, campagnes et boosts de démonstration, datés de ce lancement.
+  late final List<J> _promotions;
+  late final List<J> _campaigns;
+  late final List<J> _boosts;
+
+  /// Produits phares par boutique, dans l'ordre de la vitrine.
+  Map<String, List<String>> get _featured {
+    final volta = _seed.shops.where((s) => s['nom'] == 'Volta Électrique').firstOrNull?['id'] as String?;
+    return {
+      ?volta: const ['off-tableau-12', 'off-cable-25', 'off-disjoncteur-20a'],
+    };
+  }
+
   static Future<MockApiClient> create() async {
     final seed = await MockSeed.load();
     final db = await MockDb.open(seed);
-    return MockApiClient._(seed, db);
+    final client = MockApiClient._(seed, db);
+    client._migrate();
+    await db.save();
+    return client;
+  }
+
+  /// Schéma 2 : commandes découpées par boutique, demandes de support.
+  void _migrate() {
+    if (_db.version >= 2) return;
+    _migrateLegacyOrders();
+    if (_db.fresh) {
+      _stageDemoOrders();
+      _seedDemoTicket();
+    }
+    _db.version = 2;
   }
 
   // ── Enveloppe ─────────────────────────────────
@@ -37,9 +82,17 @@ class MockApiClient implements ApiClient {
 
   Never _fail(String message, int status) => throw ApiException(message, status);
 
+  /// Latence simulée : sans elle, les états de chargement ne s'observent pas.
+  @visibleForTesting
+  static Duration latency = const Duration(milliseconds: 260);
+
+  /// La base, pour qu'un test prépare un cas (prix modifié, délai dépassé).
+  @visibleForTesting
+  MockDb get debugDb => _db;
+
   Future<ApiResponse> _call(String method, String path, Object? body) async {
-    // Latence simulée : sans elle, les états de chargement ne s'observent pas.
-    await Future<void>.delayed(const Duration(milliseconds: 260));
+    await Future<void>.delayed(latency);
+    _pricedCache = null;
     final uri = Uri.parse(path);
     final b = body is Map ? body.cast<String, dynamic>() : <String, dynamic>{};
     final result = _route(method, uri.path, uri.queryParameters, b);
@@ -95,6 +148,24 @@ class MockApiClient implements ApiClient {
         return _search(q);
       case 'GET /promotions/flash/active':
         return _flashSales();
+      case 'POST /promotions/apply':
+        return _applyCoupon(body);
+      case 'GET /campaigns':
+        return _listCampaigns();
+      case 'GET /sponsored':
+        return _sponsored(q);
+      case 'POST /support/tickets':
+        return _createTicket(body);
+      case 'GET /support/tickets':
+        return _listTickets(q);
+      case 'POST /support/contact':
+        return _contact(body);
+      case 'GET /sanctions/mine':
+        return _mySanctions();
+      case 'POST /shop-requests':
+        return _createShopRequest(body);
+      case 'GET /shop-requests/mine':
+        return _myShopRequests();
       case 'GET /shops':
         return _listShops(q);
       case 'GET /addresses':
@@ -111,7 +182,8 @@ class MockApiClient implements ApiClient {
     // L'ordre compte : /search et /recently-viewed seraient sinon pris pour des identifiants.
     if (m(r'GET /product-boutiques/([^/]+)/suggestions') case final r?) return _suggestions(g(r, 1), q);
     if (m(r'GET /product-boutiques/recently-viewed/([^/]+)') case final r?) return _recentlyViewed(g(r, 1));
-    if (m(r'GET /product-boutiques/([^/]+)') case final r?) return _getOffer(g(r, 1));
+    if (m(r'GET /product-boutiques/([^/]+)') case final r?) return _getOffer(g(r, 1), q);
+    if (m(r'GET /campaigns/([^/]+)') case final r?) return _getCampaign(g(r, 1));
     if (m(r'GET /familles/([^/]+)') case final r?) return _ok(_find(_seed.familles, g(r, 1), 'Famille introuvable.'));
     if (m(r'GET /categories/([^/]+)') case final r?) return _ok(_find(_seed.categories, g(r, 1), 'Catégorie introuvable.'));
     if (m(r'GET /sous-categories/([^/]+)') case final r?) return _ok(_find(_seed.sousCategories, g(r, 1), 'Sous-catégorie introuvable.'));
@@ -136,6 +208,14 @@ class MockApiClient implements ApiClient {
     if (m(r'PUT /addresses/([^/]+)') case final r?) return _updateAddress(g(r, 1), body);
     if (m(r'DELETE /addresses/([^/]+)') case final r?) return _deleteAddress(g(r, 1));
     if (m(r'GET /orders/([^/]+)') case final r?) return _getOrder(g(r, 1));
+    if (m(r'POST /orders/([^/]+)') case final r?) return _createOrder(g(r, 1), body);
+    if (m(r'POST /payments/sandbox/([^/]+)') case final r?) return _settleSandboxPayment(g(r, 1), body);
+    if (m(r'POST /payments/([^/]+)') case final r?) return _restartPayment(g(r, 1));
+    if (m(r'PATCH /shop-orders/([^/]+)/([^/]+)') case final r?) return _partAction(g(r, 1), g(r, 2), body);
+    if (m(r'POST /support/tickets/([^/]+)/messages') case final r?) return _postTicketMessage(g(r, 1), body);
+    if (m(r'PATCH /support/tickets/([^/]+)/([^/]+)') case final r?) return _ticketAction(g(r, 1), g(r, 2), body);
+    if (m(r'GET /support/tickets/([^/]+)') case final r?) return _getTicket(g(r, 1));
+    if (m(r'PATCH /shop-requests/([^/]+)/cancel') case final r?) return _cancelShopRequest(g(r, 1));
 
     _fail('Route non simulée : $key', 404);
   }
@@ -258,7 +338,12 @@ class MockApiClient implements ApiClient {
   }
 
   // ── Offres ────────────────────────────────────
-  List<J> get _offers => _seed.offers;
+  /// Le catalogue aux prix du moment, calculé une fois par appel.
+  List<J>? _pricedCache;
+  List<J> get _offers {
+    final now = DateTime.now();
+    return _pricedCache ??= _seed.offers.map((o) => _withPricing(o, now)).toList();
+  }
 
   J _offer(String id) => _offers.firstWhere((o) => o['id'] == id, orElse: () => _fail('Produit en boutique introuvable', 404));
 
@@ -268,9 +353,9 @@ class MockApiClient implements ApiClient {
   }
 
   double _price(J o) => (o['price'] as num).toDouble();
-  double? _discount(J o) => (o['discountPrice'] as num?)?.toDouble();
-  bool _hasDiscount(J o) => _discount(o) != null && _discount(o)! < _price(o);
-  double _effective(J o) => _hasDiscount(o) ? _discount(o)! : _price(o);
+
+  /// En promotion : une remise affichée de 5 % au moins, et du stock.
+  bool _discounted(J o) => (((o['pricing'] as Map?)?['percent'] as num?) ?? 0) >= 5 && (o['stock'] as num) > 0;
 
   J _paginate(List<Object?> all, Map<String, String> q, {int defaultLimit = 10, String itemsKey = 'items'}) {
     final page = (int.tryParse(q['page'] ?? '') ?? 1).clamp(1, 1 << 30);
@@ -291,8 +376,14 @@ class MockApiClient implements ApiClient {
       if (shopId != null && (o['boutique'] as Map?)?['id'] != shopId) return false;
       if (q['productId'] != null && o['productId'] != q['productId']) return false;
       if (q['isFeatured'] != null && o['isFeatured'] != (q['isFeatured'] == 'true')) return false;
+      if (q['featured'] == 'true' && o['featuredRank'] == null) return false;
       return true;
     }).toList();
+    if (q['featured'] == 'true') all.sort((a, b) => (a['featuredRank'] as int).compareTo(b['featuredRank'] as int));
+    if (q['sort'] == 'best_sellers') {
+      final sales = _salesCounts();
+      all.sort((a, b) => (sales[b['id']] ?? 0).compareTo(sales[a['id']] ?? 0));
+    }
     return _ok(_paginate(all, q));
   }
 
@@ -301,6 +392,7 @@ class MockApiClient implements ApiClient {
     final minPrice = double.tryParse(q['minPrice'] ?? '');
     final maxPrice = double.tryParse(q['maxPrice'] ?? '');
     final minRating = double.tryParse(q['minRating'] ?? '');
+    final enrolled = q['campaignId'] == null ? null : _campaignOfferIds(q['campaignId']!, DateTime.now());
 
     // Le prix est filtré à part : la facette priceRange décrit la sélection
     // sans la contrainte de prix, comme le back.
@@ -316,7 +408,8 @@ class MockApiClient implements ApiClient {
       }
       if (minRating != null && ((o['rating'] as num?) ?? 0) < minRating) return false;
       if (q['inStock'] == 'true' && (o['stock'] as num) <= 0) return false;
-      if (q['discounted'] == 'true' && !_hasDiscount(o)) return false;
+      if (q['discounted'] == 'true' && !_discounted(o)) return false;
+      if (enrolled != null && !enrolled.contains(o['id'])) return false;
       return true;
     }).toList();
 
@@ -333,7 +426,12 @@ class MockApiClient implements ApiClient {
       'price_desc': (a, b) => _price(b).compareTo(_price(a)),
       'rating': (a, b) => ((b['rating'] as num?) ?? 0).compareTo((a['rating'] as num?) ?? 0),
       'popular': (a, b) => ((b['reviewsCount'] as num?) ?? 0).compareTo((a['reviewsCount'] as num?) ?? 0),
+      'discount': (a, b) => (((b['pricing'] as Map)['percent'] as num?) ?? 0).compareTo(((a['pricing'] as Map)['percent'] as num?) ?? 0),
     };
+    if (q['sort'] == 'best_sellers') {
+      final sales = _salesCounts();
+      sorts['best_sellers'] = (a, b) => (sales[b['id']] ?? 0).compareTo(sales[a['id']] ?? 0);
+    }
     all.sort(sorts[q['sort']] ?? sorts['newest']);
 
     final prices = withoutPrice.map(_price).toList();
@@ -362,8 +460,11 @@ class MockApiClient implements ApiClient {
     return _ok(ranked.take(limit).toList());
   }
 
-  ApiResponse _getOffer(String id) {
+  ApiResponse _getOffer(String id, Map<String, String> q) {
     final offer = _offer(id);
+    // Arrivée depuis une place sponsorisée (?src=boost:<id>) : la visite est comptée.
+    final src = q['src'] ?? '';
+    if (src.startsWith('boost:')) _recordBoostVisit(src.substring('boost:'.length), id);
     // Comme le back : consulter une fiche alimente l'historique d'un utilisateur connecté.
     final userId = _db.sessionUserId;
     if (userId != null) {
@@ -389,17 +490,6 @@ class MockApiClient implements ApiClient {
         .whereType<J>()
         .toList();
     return _ok(offers, 'Produits récemment vus récupérés avec succès');
-  }
-
-  ApiResponse _flashSales() {
-    final now = DateTime.now();
-    final running = _seed.promotions.where((p) {
-      final start = DateTime.parse(p['startDate'] as String);
-      final end = DateTime.parse(p['endDate'] as String);
-      return p['type'] == 'flash_sale' && p['actif'] == true && !start.isAfter(now) && end.isAfter(now);
-    }).toList()
-      ..sort((a, b) => (a['endDate'] as String).compareTo(b['endDate'] as String));
-    return _ok(running.map((p) => {...p, 'isActive': true}).toList());
   }
 
   // ── Boutiques ─────────────────────────────────
@@ -431,16 +521,23 @@ class MockApiClient implements ApiClient {
   J _cartDto(J cart) {
     final items = _cartItems(cart).map((item) {
       final pb = _offers.where((o) => o['id'] == item['productBoutiqueId']).firstOrNull;
-      final unit = (item['price'] as num).toDouble();
       final qty = item['quantity'] as int;
+      // Le prix en vigueur fait foi (le checkout le recalcule) ; le prix vu à
+      // l'ajout ne sert qu'à signaler l'écart.
+      final unit = pb == null ? (item['price'] as num).toDouble() : _unitPrice(pb, qty);
+      final base = (pb?['price'] as num?)?.toDouble() ?? unit;
       return {
         'productBoutiqueId': item['productBoutiqueId'],
         'productId': pb?['productId'],
         'productName': (pb?['product'] as Map?)?['name'],
         'urlImages': pb?['urlImages'] ?? <String>[],
-        'price': pb?['price'] ?? unit,
+        'price': base,
         if (pb?['discountPrice'] != null) 'discountPrice': pb!['discountPrice'],
         'unitPrice': unit,
+        'addedUnitPrice': item['price'],
+        'priceChanged': unit != (item['price'] as num),
+        'savings': (base - unit).clamp(0, double.infinity) * qty,
+        if (pb != null) 'pricing': pb['pricing'],
         'quantity': qty,
         'stock': pb?['stock'] ?? 0,
         'lineTotal': unit * qty,
@@ -452,6 +549,7 @@ class MockApiClient implements ApiClient {
       'items': items,
       'totalItems': items.fold<int>(0, (t, i) => t + (i['quantity'] as int)),
       'totalAmount': items.fold<double>(0, (t, i) => t + (i['lineTotal'] as double)),
+      'totalSavings': items.fold<double>(0, (t, i) => t + (i['savings'] as num)),
     };
   }
 
@@ -471,11 +569,12 @@ class MockApiClient implements ApiClient {
     final next = ((existing?['quantity'] as int?) ?? 0) + quantity;
     // Le back répond 400 — et non 409 — sur un stock insuffisant.
     if (next > (pb['stock'] as num)) _fail('Stock insuffisant (disponible : ${pb['stock']})', 400);
+    // Prix du moment pour cette quantité : promotion et palier compris.
     if (existing != null) {
       existing['quantity'] = next;
-      existing['price'] = _effective(pb);
+      existing['price'] = _unitPrice(pb, next);
     } else {
-      _cartItems(cart).add({'productBoutiqueId': pb['id'], 'quantity': quantity, 'price': _effective(pb)});
+      _cartItems(cart).add({'productBoutiqueId': pb['id'], 'quantity': quantity, 'price': _unitPrice(pb, quantity)});
     }
     _touch(cart);
     return _ok(_cartDto(cart), 'Article ajouté au panier avec succès');
@@ -494,6 +593,8 @@ class MockApiClient implements ApiClient {
       final pb = _offer(pbId);
       if (quantity > (pb['stock'] as num)) _fail('Stock insuffisant (disponible : ${pb['stock']})', 400);
       items[index]['quantity'] = quantity;
+      // Un palier peut changer le prix avec la quantité.
+      items[index]['price'] = _unitPrice(pb, quantity);
     }
     _touch(cart);
     return _ok(_cartDto(cart), 'Panier mis à jour avec succès');
@@ -539,6 +640,12 @@ class MockApiClient implements ApiClient {
 
   ApiResponse _deliveryQuote(String userId, J body) {
     _requireSelf(userId);
+    return _ok(_quote(userId, body), 'Devis de livraison calculé');
+  }
+
+  /// Le devis, aux prix du moment ; livraison offerte quand la part d'une
+  /// boutique atteint son seuil.
+  J _quote(String userId, J body) {
     final cart = _cartDto(_cartOf(userId));
     final lines = (cart['items'] as List).cast<Map<String, dynamic>>();
     final requested = <String, String>{
@@ -553,6 +660,8 @@ class MockApiClient implements ApiClient {
       byShop.putIfAbsent(shopId, () => []).add({...line, 'offer': offer});
     }
 
+    final partTotals = {for (final e in byShop.entries) e.key: e.value.fold<double>(0, (s, l) => s + (l['lineTotal'] as num))};
+    final freeRules = _freeShippingRules(byShop.keys, DateTime.now());
     final groups = byShop.entries.map((entry) {
       final shop = (entry.value.first['offer'] as Map?)?['boutique'] as Map?;
       final nom = shop?['nom'] as String? ?? 'cette boutique';
@@ -579,19 +688,31 @@ class MockApiClient implements ApiClient {
       if (chosen == null) return {...base, 'options': options, 'error': 'Choisissez un mode de livraison pour $nom.'};
       final option = options.where((o) => o['method'] == chosen).firstOrNull;
       if (option == null) return {...base, 'options': options, 'error': "« ${_labels[chosen] ?? chosen} » n'est pas proposé par $nom pour ces articles."};
+      final rule = freeRules[entry.key];
+      if (rule != null) {
+        final part = partTotals[entry.key] ?? 0;
+        final applied = part >= rule.minAmount;
+        return {
+          ...base,
+          'options': options,
+          'selectedMethod': chosen,
+          'fee': applied ? 0 : option['fee'],
+          'freeShipping': {'threshold': rule.minAmount, 'applied': applied, 'remaining': (rule.minAmount - part).clamp(0, double.infinity), 'label': rule.label},
+        };
+      }
       return {...base, 'options': options, 'selectedMethod': chosen, 'fee': option['fee']};
     }).toList();
 
     final shippingFee = groups.fold<num>(0, (sum, g) => sum + ((g['fee'] as num?) ?? 0));
     final subtotal = cart['totalAmount'] as num;
-    return _ok({
+    return {
       'groups': groups,
       'shippingFee': shippingFee,
       'ready': groups.isNotEmpty && groups.every((g) => g['selectedMethod'] != null && g['error'] == null),
       'currency': 'GNF',
       'subtotal': subtotal,
       'total': subtotal + shippingFee,
-    }, 'Devis de livraison calculé');
+    };
   }
 
   // ── Favoris ───────────────────────────────────
@@ -742,38 +863,5 @@ class MockApiClient implements ApiClient {
       if (rest.isNotEmpty) rest.first['isDefault'] = true;
     }
     return _ok(null, 'Adresse supprimée avec succès');
-  }
-
-  // ── Commandes ─────────────────────────────────
-  /// Enrichissement façon `buildOrderDto` : offre, boutique et produit imbriqués.
-  J _orderDto(J order) {
-    final items = (order['items'] as List).cast<Map<String, dynamic>>().map((item) {
-      final pb = _offers.where((o) => o['id'] == item['productBoutiqueId']).firstOrNull;
-      final price = (item['price'] as num).toDouble();
-      final qty = item['quantity'] as int;
-      return {
-        'productBoutique': ?pb,
-        if (pb?['boutique'] != null) 'boutique': pb!['boutique'],
-        if (pb?['product'] != null) 'product': pb!['product'],
-        'price': price,
-        'quantity': qty,
-        'lineTotal': price * qty,
-      };
-    }).toList();
-    return {...order, 'items': items, 'totalItems': items.fold<int>(0, (t, i) => t + (i['quantity'] as int))};
-  }
-
-  ApiResponse _listOrders(Map<String, String> q) {
-    _requireSelf(q['userId'] ?? '');
-    final all = _db.list('orders').where((o) => o['userId'] == q['userId'] && (q['status'] == null || o['status'] == q['status'])).toList()
-      ..sort(_byNewest);
-    return _ok(_paginate(all.map(_orderDto).toList(), q, itemsKey: 'orders'), 'Commandes récupérées avec succès');
-  }
-
-  ApiResponse _getOrder(String id) {
-    final user = _sessionUser();
-    final order = _db.list('orders').firstWhere((o) => o['id'] == id, orElse: () => _fail('Commande non trouvée', 404));
-    if (order['userId'] != user['_id'] && user['role'] != 'admin') _fail('Vous ne pouvez consulter que vos propres commandes.', 403);
-    return _ok(_orderDto(order), 'Commande récupérée avec succès');
   }
 }

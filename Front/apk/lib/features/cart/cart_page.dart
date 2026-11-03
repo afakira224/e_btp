@@ -20,9 +20,9 @@ import 'shared/delivery_controller.dart';
 // ─────────────────────────────────────────────
 //  Panier — balayer une ligne vers la gauche la retire, avec « Annuler ».
 //  Chaque ligne choisit sa livraison à côté de la quantité ; le mode est
-//  celui de la boutique, partagé par toutes ses lignes.
-//  « Passer commande » reste désactivé, comme sur le web : le tunnel de
-//  commande n'existe pas encore côté front (point ouvert du cahier).
+//  celui de la boutique, partagé par toutes ses lignes. Les prix sont ceux
+//  du moment (promotion et palier compris) : un prix qui a bougé depuis
+//  l'ajout est signalé, et l'économie de chaque ligne affichée.
 // ─────────────────────────────────────────────
 class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
@@ -49,11 +49,16 @@ class _CartPageState extends ConsumerState<CartPage> {
     HapticFeedback.mediumImpact();
     await _run(() => ref.read(cartProvider.notifier).remove(item.productBoutiqueId));
     if (!mounted) return;
-    showMessage(context, 'Article retiré', actionLabel: 'Annuler', onAction: () {
-      ref.read(cartProvider.notifier).add(item.productBoutiqueId, item.quantity).catchError((Object e) {
-        if (mounted) showMessage(context, errorMessage(e));
-      });
-    });
+    showMessage(
+      context,
+      'Article retiré',
+      actionLabel: 'Annuler',
+      onAction: () {
+        ref.read(cartProvider.notifier).add(item.productBoutiqueId, item.quantity).catchError((Object e) {
+          if (mounted) showMessage(context, errorMessage(e));
+        });
+      },
+    );
   }
 
   Future<void> _confirmClear() async {
@@ -89,102 +94,122 @@ class _CartPageState extends ConsumerState<CartPage> {
       bottomNavigationBar: cart.items.isEmpty ? null : _Summary(cart: cart, quote: quote, quoting: quoting),
       body: RefreshIndicator(
         onRefresh: ref.read(cartProvider.notifier).refresh,
-        child: CustomScrollView(slivers: [
-          chromeSliverAppBar(
-            context,
-            title: 'Panier',
-            actions: [
-              if (cart.items.isNotEmpty) IconButton(tooltip: 'Vider le panier', icon: const Icon(Icons.delete_sweep_outlined), onPressed: _busy ? null : _confirmClear),
-              const SizedBox(width: Space.s1),
-            ],
-          ),
-          if (cart.items.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: EmptyState(
-                  icon: Icons.shopping_bag_outlined,
-                  title: 'Votre panier est vide',
-                  text: 'Ajoutez des articles depuis le catalogue pour préparer votre commande.',
-                  actionLabel: 'Parcourir le catalogue',
-                  onAction: () => context.go('/catalogue'),
+        child: CustomScrollView(
+          slivers: [
+            chromeSliverAppBar(
+              context,
+              title: 'Panier',
+              actions: [
+                if (cart.items.isNotEmpty) IconButton(tooltip: 'Vider le panier', icon: const Icon(Icons.delete_sweep_outlined), onPressed: _busy ? null : _confirmClear),
+                const SizedBox(width: Space.s1),
+              ],
+            ),
+            if (cart.items.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: EmptyState(
+                    icon: Icons.shopping_bag_outlined,
+                    title: 'Votre panier est vide',
+                    text: 'Ajoutez des articles depuis le catalogue pour préparer votre commande.',
+                    actionLabel: 'Parcourir le catalogue',
+                    onAction: () => context.go('/catalogue'),
+                  ),
+                ),
+              )
+            else ...[
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(context.gutter, Space.s4, context.gutter, Space.s2),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '${plural(cart.totalItems, 'article')} · ${plural(cart.items.length, 'référence')}',
+                        style: TextStyle(color: t.textMuted, fontSize: 13, fontWeight: FontWeight.w500),
+                      ),
+                      if (cart.hasBlockingIssue) ...[
+                        const SizedBox(height: Space.s3),
+                        const AlertBanner(tone: AlertTone.warning, message: 'Certains articles dépassent le stock disponible. Ajustez les quantités avant de commander.'),
+                      ],
+                      // Livraison offerte d'une boutique : appliquée, ou ce qu'il reste à ajouter.
+                      for (final g in quote?.groups ?? const <DeliveryGroupQuote>[])
+                        if (g.freeShipping case final free?) ...[
+                          const SizedBox(height: Space.s3),
+                          AlertBanner(
+                            tone: free.applied ? AlertTone.success : AlertTone.info,
+                            message: free.applied
+                                ? '${g.boutiqueNom ?? 'Cette boutique'} : livraison offerte (${free.label.toLowerCase()}).'
+                                : 'Plus que ${formatPrice(free.remaining)} chez ${g.boutiqueNom ?? 'cette boutique'} pour la livraison offerte.',
+                          ),
+                        ],
+                    ],
+                  ),
                 ),
               ),
-            )
-          else ...[
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(context.gutter, Space.s4, context.gutter, Space.s2),
-              sliver: SliverToBoxAdapter(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Text('${plural(cart.totalItems, 'article')} · ${plural(cart.items.length, 'référence')}', style: TextStyle(color: t.textMuted, fontSize: 13, fontWeight: FontWeight.w500)),
-                  if (cart.hasBlockingIssue) ...[
-                    const SizedBox(height: Space.s3),
-                    const AlertBanner(tone: AlertTone.warning, message: 'Certains articles dépassent le stock disponible. Ajustez les quantités avant de commander.'),
-                  ],
-                ]),
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: context.gutter),
+                sliver: SliverList.separated(
+                  itemCount: cart.items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: Space.s3),
+                  itemBuilder: (context, i) {
+                    final item = cart.items[i];
+                    return Dismissible(
+                      key: ValueKey(item.productBoutiqueId),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: Space.s5),
+                        decoration: BoxDecoration(color: t.danger, borderRadius: BorderRadius.circular(Radii.md)),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.delete_outline, color: t.surface),
+                            const SizedBox(width: Space.s1),
+                            Text(
+                              'Retirer',
+                              style: TextStyle(color: t.surface, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                      onDismissed: (_) => _remove(item),
+                      child: _Line(
+                        item: item,
+                        busy: _busy,
+                        delivery: quote?.groupOf(item.productBoutiqueId),
+                        deliveryBusy: quoting,
+                        onDelivery: (group, mode) => ref.read(deliverySelectionProvider.notifier).choose(group.boutiqueId, mode),
+                        onQuantity: (q) => _run(() => ref.read(cartProvider.notifier).setQuantity(item.productBoutiqueId, q)),
+                        onRemove: () => _remove(item),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
-            SliverPadding(
-              padding: EdgeInsets.symmetric(horizontal: context.gutter),
-              sliver: SliverList.separated(
-                itemCount: cart.items.length,
-                separatorBuilder: (_, _) => const SizedBox(height: Space.s3),
-                itemBuilder: (context, i) {
-                  final item = cart.items[i];
-                  return Dismissible(
-                    key: ValueKey(item.productBoutiqueId),
-                    direction: DismissDirection.endToStart,
-                    background: Container(
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: Space.s5),
-                      decoration: BoxDecoration(color: t.danger, borderRadius: BorderRadius.circular(Radii.md)),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.delete_outline, color: t.surface),
-                        const SizedBox(width: Space.s1),
-                        Text('Retirer', style: TextStyle(color: t.surface, fontWeight: FontWeight.w600)),
-                      ]),
-                    ),
-                    onDismissed: (_) => _remove(item),
-                    child: _Line(
-                      item: item,
-                      busy: _busy,
-                      delivery: quote?.groupOf(item.productBoutiqueId),
-                      deliveryBusy: quoting,
-                      onDelivery: (group, mode) => ref.read(deliverySelectionProvider.notifier).choose(group.boutiqueId, mode),
-                      onQuantity: (q) => _run(() => ref.read(cartProvider.notifier).setQuantity(item.productBoutiqueId, q)),
-                      onRemove: () => _remove(item),
-                    ),
-                  );
-                },
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, Space.s6),
+                sliver: SliverToBoxAdapter(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.swipe_left_outlined, size: 16, color: t.textMuted),
+                      const SizedBox(width: Space.s1),
+                      Text('Balayez un article vers la gauche pour le retirer', style: TextStyle(color: t.textMuted, fontSize: 12)),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, Space.s6),
-              sliver: SliverToBoxAdapter(
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.swipe_left_outlined, size: 16, color: t.textMuted),
-                  const SizedBox(width: Space.s1),
-                  Text('Balayez un article vers la gauche pour le retirer', style: TextStyle(color: t.textMuted, fontSize: 12)),
-                ]),
-              ),
-            ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
 }
 
 class _Line extends StatelessWidget {
-  const _Line({
-    required this.item,
-    required this.busy,
-    required this.delivery,
-    required this.deliveryBusy,
-    required this.onDelivery,
-    required this.onQuantity,
-    required this.onRemove,
-  });
+  const _Line({required this.item, required this.busy, required this.delivery, required this.deliveryBusy, required this.onDelivery, required this.onQuantity, required this.onRemove});
 
   final CartItem item;
   final bool busy;
@@ -203,72 +228,123 @@ class _Line extends StatelessWidget {
     return AppCard(
       padding: const EdgeInsets.all(Space.s3),
       onTap: () => context.openOffer(item.productBoutiqueId),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 84, child: ProductThumbnail(url: item.urlImages.firstOrNull, seed: item.productBoutiqueId)),
-        const SizedBox(width: Space.s3),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, height: 1.3))),
-              SizedBox(
-                width: 36,
-                height: 36,
-                child: IconButton(
-                  tooltip: 'Retirer $name',
-                  padding: EdgeInsets.zero,
-                  style: IconButton.styleFrom(minimumSize: const Size(36, 36)),
-                  onPressed: busy ? null : onRemove,
-                  icon: Icon(Icons.close, size: 20, color: t.textMuted),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: ProductThumbnail(url: item.urlImages.firstOrNull, seed: item.productBoutiqueId),
+          ),
+          const SizedBox(width: Space.s3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, height: 1.3),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: IconButton(
+                        tooltip: 'Retirer $name',
+                        padding: EdgeInsets.zero,
+                        style: IconButton.styleFrom(minimumSize: const Size(36, 36)),
+                        onPressed: busy ? null : onRemove,
+                        icon: Icon(Icons.close, size: 20, color: t.textMuted),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ]),
-            Row(children: [
-              Expanded(child: Text('${formatPrice(item.unitPrice)} l’unité', style: TextStyle(color: t.textMuted, fontSize: 12))),
-              Text(formatPrice(item.lineTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-            ]),
-            if (item.isOutOfStock)
-              Text('Rupture de stock', style: TextStyle(fontSize: 12, color: t.danger, fontWeight: FontWeight.w600))
-            else if (item.exceedsStock)
-              Text('Plus que ${item.stock} en stock', style: TextStyle(fontSize: 12, color: t.warning, fontWeight: FontWeight.w600)),
-            const SizedBox(height: Space.s2),
-            Row(children: [
-              QuantityStepper(
-                compact: true,
-                value: item.quantity,
-                // Descendre sous 1 retire la ligne : on passe par la croix.
-                min: 1,
-                max: item.stock < item.quantity ? item.quantity : item.stock,
-                itemName: name,
-                onChanged: busy ? null : onQuantity,
-              ),
-              if (delivery case final group? when group.options.isNotEmpty) ...[
-                const SizedBox(width: Space.s2),
-                Expanded(
-                  child: _DeliveryPicker(
-                    group: group,
-                    itemName: name,
-                    onChanged: busy || deliveryBusy ? null : (mode) => onDelivery(group, mode),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: '${formatPrice(item.unitPrice)} l’unité'),
+                            if (item.unitPrice < item.price)
+                              TextSpan(
+                                text: '  ${formatPrice(item.price)}',
+                                style: const TextStyle(decoration: TextDecoration.lineThrough),
+                              ),
+                          ],
+                        ),
+                        style: TextStyle(color: t.textMuted, fontSize: 12),
+                      ),
+                    ),
+                    Text(formatPrice(item.lineTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  ],
+                ),
+                if (item.savings > 0)
+                  Text(
+                    'Économie : ${formatPrice(item.savings)}${item.promotionLabel != null ? ' · ${item.promotionLabel}' : ''}',
+                    style: TextStyle(fontSize: 12, color: t.accent, fontWeight: FontWeight.w600),
                   ),
+                if (item.priceChanged)
+                  Text(
+                    item.priceDelta > 0
+                        ? 'La promotion est terminée : +${formatPrice(item.priceDelta)} l’unité depuis l’ajout'
+                        : 'Le prix a baissé : −${formatPrice(-item.priceDelta)} l’unité depuis l’ajout',
+                    style: TextStyle(fontSize: 12, color: item.priceDelta > 0 ? t.warning : t.success, fontWeight: FontWeight.w600),
+                  ),
+                if (item.isOutOfStock)
+                  Text(
+                    'Rupture de stock',
+                    style: TextStyle(fontSize: 12, color: t.danger, fontWeight: FontWeight.w600),
+                  )
+                else if (item.exceedsStock)
+                  Text(
+                    'Plus que ${item.stock} en stock',
+                    style: TextStyle(fontSize: 12, color: t.warning, fontWeight: FontWeight.w600),
+                  ),
+                const SizedBox(height: Space.s2),
+                Row(
+                  children: [
+                    QuantityStepper(
+                      compact: true,
+                      value: item.quantity,
+                      // Descendre sous 1 retire la ligne : on passe par la croix.
+                      min: 1,
+                      max: item.stock < item.quantity ? item.quantity : item.stock,
+                      itemName: name,
+                      onChanged: busy ? null : onQuantity,
+                    ),
+                    if (delivery case final group? when group.options.isNotEmpty) ...[
+                      const SizedBox(width: Space.s2),
+                      Expanded(
+                        child: _DeliveryPicker(group: group, itemName: name, onChanged: busy || deliveryBusy ? null : (mode) => onDelivery(group, mode)),
+                      ),
+                    ],
+                  ],
                 ),
+                if (delivery case final group?)
+                  if (group.options.isEmpty && group.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: Space.s1),
+                      child: Text(group.error!, style: TextStyle(fontSize: 11.5, color: t.danger, height: 1.3)),
+                    )
+                  else if (group.productBoutiqueIds.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(top: Space.s1),
+                      child: Text(
+                        'Même livraison pour les ${group.productBoutiqueIds.length} articles de ${group.boutiqueNom ?? 'cette boutique'}',
+                        style: TextStyle(fontSize: 11.5, color: t.textMuted, height: 1.3),
+                      ),
+                    ),
               ],
-            ]),
-            if (delivery case final group?)
-              if (group.options.isEmpty && group.error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: Space.s1),
-                  child: Text(group.error!, style: TextStyle(fontSize: 11.5, color: t.danger, height: 1.3)),
-                )
-              else if (group.productBoutiqueIds.length > 1)
-                Padding(
-                  padding: const EdgeInsets.only(top: Space.s1),
-                  child: Text(
-                    'Même livraison pour les ${group.productBoutiqueIds.length} articles de ${group.boutiqueNom ?? 'cette boutique'}',
-                    style: TextStyle(fontSize: 11.5, color: t.textMuted, height: 1.3),
-                  ),
-                ),
-          ]),
-        ),
-      ]),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -284,10 +360,10 @@ class _DeliveryPicker extends StatelessWidget {
   final ValueChanged<DeliveryMode>? onChanged;
 
   String _short(DeliveryOption o) => switch (o.method) {
-        DeliveryMode.pickup => 'Retrait',
-        DeliveryMode.free => 'Gratuite',
-        DeliveryMode.flatRate => formatPrice(o.fee),
-      };
+    DeliveryMode.pickup => 'Retrait',
+    DeliveryMode.free => 'Gratuite',
+    DeliveryMode.flatRate => formatPrice(o.fee),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -314,23 +390,35 @@ class _DeliveryPicker extends StatelessWidget {
                   },
             selectedItemBuilder: (_) => [
               for (final o in group.options)
-                Row(children: [
-                  Icon(o.method == DeliveryMode.pickup ? Icons.storefront_outlined : Icons.local_shipping_outlined, size: 16, color: t.textMuted),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(_short(o), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: t.text)),
-                  ),
-                ]),
+                Row(
+                  children: [
+                    Icon(o.method == DeliveryMode.pickup ? Icons.storefront_outlined : Icons.local_shipping_outlined, size: 16, color: t.textMuted),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _short(o),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: t.text),
+                      ),
+                    ),
+                  ],
+                ),
             ],
             items: [
               for (final o in group.options)
                 DropdownMenuItem(
                   value: o.method,
-                  child: Row(children: [
-                    Expanded(child: Text(o.method.label, style: const TextStyle(fontSize: 14))),
-                    const SizedBox(width: Space.s3),
-                    Text(formatFee(o.fee), style: TextStyle(fontSize: 13, color: t.textMuted, fontWeight: FontWeight.w600)),
-                  ]),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(o.method.label, style: const TextStyle(fontSize: 14))),
+                      const SizedBox(width: Space.s3),
+                      Text(
+                        formatFee(o.fee),
+                        style: TextStyle(fontSize: 13, color: t.textMuted, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 ),
             ],
           ),
@@ -356,22 +444,45 @@ class _Summary extends StatelessWidget {
     final current = q != null && !quoting && q.subtotal == cart.totalAmount;
     final ready = current && q.ready;
     final livraison = ready ? formatFee(q.shippingFee) : (current ? 'à choisir' : '…');
+    final canOrder = ready && !cart.hasBlockingIssue;
     return BottomActionBar(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Total', style: TextStyle(color: t.textMuted, fontSize: 13)),
-              Text(formatPrice(ready ? q.total : cart.totalAmount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.4)),
-            ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total', style: TextStyle(color: t.textMuted, fontSize: 13)),
+                    Text(formatPrice(ready ? q.total : cart.totalAmount), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, letterSpacing: -0.4)),
+                    if (cart.totalSavings > 0)
+                      Text(
+                        'Vous économisez ${formatPrice(cart.totalSavings)}',
+                        style: TextStyle(color: t.accent, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                  ],
+                ),
+              ),
+              Text(
+                'Livraison\n$livraison',
+                textAlign: TextAlign.right,
+                style: TextStyle(color: t.textMuted, fontSize: 11.5, height: 1.3),
+              ),
+            ],
           ),
-          Text('Livraison\n$livraison', textAlign: TextAlign.right, style: TextStyle(color: t.textMuted, fontSize: 11.5, height: 1.3)),
-        ]),
-        const SizedBox(height: Space.s3),
-        // La commande n'existe pas encore côté front : plutôt qu'un bouton
-        // qui ne ferait rien, on l'annonce.
-        const SizedBox(width: double.infinity, child: FilledButton(onPressed: null, child: Text('Passer commande · bientôt'))),
-      ]),
+          const SizedBox(height: Space.s3),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: canOrder ? () => context.push('/panier/commande') : null,
+              child: Text(canOrder ? 'Passer commande' : (current && !q.ready ? 'Choisissez les livraisons' : 'Passer commande')),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -27,6 +27,19 @@ class AccountApi {
 
   Future<Order> order(String id) async => Order.fromJson((await _api.get('/orders/${Uri.encodeComponent(id)}')).map);
 
+  /// Action du client sur la sous-commande d'une boutique (annuler, demander un retour).
+  Future<String> partAction(String partId, ShopOrderAction action, {String? reason, String? note}) async => (await _api.patch('/shop-orders/${Uri.encodeComponent(partId)}/${action.value}', {
+    if (reason != null && reason.isNotEmpty) 'reason': reason,
+    if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+  })).message;
+
+  /// Relance le paiement en ligne d'une commande en attente : renvoie la page du prestataire.
+  Future<String?> restartPayment(String orderId) async => strOrNull((await _api.post('/payments/${Uri.encodeComponent(orderId)}')).map, 'redirectUrl');
+
+  /// Prestataire simulé (« sandbox ») : l'issue du paiement, choisie à l'écran.
+  Future<String> settleSandboxPayment(String orderId, {required bool paid}) async =>
+      (await _api.post('/payments/sandbox/${Uri.encodeComponent(orderId)}', {'outcome': paid ? 'paid' : 'failed'})).message;
+
   /// Par défaut en tête, puis les plus récentes — l'ordre du back.
   Future<List<Address>> addresses(String userId) async =>
       (await _api.get('/addresses?userId=${Uri.encodeQueryComponent(userId)}')).list.cast<Map>().map((e) => Address.fromJson(e.cast())).toList();
@@ -48,12 +61,12 @@ final orderProvider = FutureProvider.autoDispose.family<Order, String>((ref, id)
 
 /// Aperçus des tuiles de « Mon compte » : décomptes lus avec `limit=1`,
 /// justes quel que soit le nombre de commandes ; « en cours » additionne
-/// trois statuts.
+/// les commandes en cours et celles qui attendent leur paiement.
 final accountOverviewProvider = FutureProvider.autoDispose<({int total, int inProgress})>((ref) async {
   final userId = ref.watch(currentUserIdProvider);
   if (userId.isEmpty) return (total: 0, inProgress: 0);
   final api = ref.watch(accountApiProvider);
   Future<int> count([OrderStatus? s]) async => (await api.orders(userId, status: s, page: 1, limit: 1)).total;
-  final results = await Future.wait([count(), count(OrderStatus.pending), count(OrderStatus.confirmed), count(OrderStatus.shipped)]);
-  return (total: results[0], inProgress: results[1] + results[2] + results[3]);
+  final results = await Future.wait([count(), count(OrderStatus.inProgress), count(OrderStatus.awaitingPayment)]);
+  return (total: results[0], inProgress: results[1] + results[2]);
 });

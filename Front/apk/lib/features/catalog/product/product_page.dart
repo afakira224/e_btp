@@ -11,6 +11,7 @@ import '../../../entities/product.dart';
 import '../../../shared/api/api_exception.dart';
 import '../../../shared/config/env.dart';
 import '../../../shared/ui/badge.dart';
+import '../../../shared/ui/countdown.dart';
 import '../../../shared/ui/kit.dart';
 import '../../../shared/ui/responsive.dart';
 import '../../../shared/ui/states.dart';
@@ -23,6 +24,7 @@ import '../../wishlist/shared/wishlist_controller.dart';
 import '../shared/catalog_api.dart';
 import '../shared/product_card.dart';
 import '../shared/product_grid.dart';
+import '../shared/sponsored_rail.dart';
 
 final _recentlyViewedProvider = FutureProvider.autoDispose.family<List<ProductBoutique>, String>((ref, key) {
   final userId = key.split(':').first;
@@ -35,13 +37,16 @@ final _recentlyViewedProvider = FutureProvider.autoDispose.family<List<ProductBo
 //  fiches et deux prix. Photo plein cadre, barre d'achat collée en bas.
 // ─────────────────────────────────────────────
 class ProductPage extends ConsumerWidget {
-  const ProductPage({super.key, required this.id});
+  const ProductPage({super.key, required this.id, this.src});
 
   final String id;
 
+  /// D'où vient la visite : `boost:<id>` depuis une place sponsorisée.
+  final String? src;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offer = ref.watch(offerProvider(id));
+    final offer = ref.watch(offerProvider((id, src)));
     return offer.when(
       loading: () => Scaffold(
         appBar: AppBar(),
@@ -151,11 +156,22 @@ class _ProductView extends ConsumerWidget {
                 PriceLine(offer: offer, large: true),
                 if (offer.discountPercent != null) ...[
                   const SizedBox(height: Space.s1),
-                  Row(children: [
-                    BtpBadge('−${formatPercent(offer.discountPercent!)}', tone: BadgeTone.accent),
-                    const SizedBox(width: Space.s2),
-                    Text('Vous économisez ${formatPrice(offer.saving)}', style: TextStyle(color: t.accent, fontWeight: FontWeight.w600, fontSize: 13)),
+                  Wrap(spacing: Space.s2, runSpacing: Space.s1, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    BtpBadge('${offer.isFlashSale ? '⚡ ' : ''}−${formatPercent(offer.discountPercent!)}', tone: BadgeTone.accent),
+                    if (offer.saving > 0) Text('Vous économisez ${formatPrice(offer.saving)}', style: TextStyle(color: t.accent, fontWeight: FontWeight.w600, fontSize: 13)),
                   ]),
+                ],
+                _PromotionInfo(offer: offer),
+                if (offer.usefulTiers.isNotEmpty) ...[
+                  const SizedBox(height: Space.s4),
+                  ListGroup(
+                    title: 'Prix par quantité',
+                    footer: 'Le prix baisse dès la quantité atteinte, dans le panier comme à la commande.',
+                    children: [
+                      ListRow(title: "À l'unité", value: formatPrice(offer.effectivePrice)),
+                      for (final tier in offer.usefulTiers) ListRow(title: 'Dès ${tier.minQuantity} unités · −${formatPercent(tier.percent)}', value: '${formatPrice(tier.unitPrice)} / u.'),
+                    ],
+                  ),
                 ],
                 const SizedBox(height: Space.s5),
                 if (offer.boutique != null)
@@ -191,9 +207,23 @@ class _ProductView extends ConsumerWidget {
                   const SizedBox(height: Space.s4),
                   Wrap(spacing: Space.s2, runSpacing: Space.s2, children: [for (final tag in offer.tags) BtpBadge(tag, tone: BadgeTone.muted)]),
                 ],
+                const SizedBox(height: Space.s3),
+                // Annonce trompeuse, produit interdit, prix abusif : l'équipe examine.
+                TextButton.icon(
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: t.textMuted),
+                  onPressed: () {
+                    if (!requireSession(context, ref)) return;
+                    context.push('/compte/support/nouvelle?${Uri(queryParameters: {'type': 'listing_report', 'cible': offer.id, 'libelle': offer.name}).query}');
+                  },
+                  icon: const Icon(Icons.flag_outlined, size: 18),
+                  label: const Text('Signaler cette annonce'),
+                ),
               ]),
             ),
           ),
+        ),
+        SliverToBoxAdapter(
+          child: SponsoredRail(slot: SponsoredSlot('similar', offerId: offer.id), title: 'Sponsorisé, dans le même rayon'),
         ),
         SliverToBoxAdapter(child: ProductRail(title: 'Produits similaires', items: similar.value ?? const [], loading: similar.isLoading)),
         if (shopOffers != null)
@@ -296,6 +326,49 @@ class _ExpandableTextState extends State<_ExpandableText> {
   }
 }
 
+/// La promotion du prix : son nom, sa fin (compte à rebours pour une vente flash).
+class _PromotionInfo extends StatelessWidget {
+  const _PromotionInfo({required this.offer});
+
+  final ProductBoutique offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final promo = offer.pricing?.promotion;
+    final end = offer.promotionEnd;
+    if (promo == null || offer.discountPercent == null) return const SizedBox.shrink();
+    if (offer.isFlashSale && end != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: Space.s3),
+        child: AppCard(
+          color: t.chrome,
+          outlined: false,
+          padding: const EdgeInsets.all(Space.s3),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.bolt, color: t.onChrome, size: 18),
+              const SizedBox(width: Space.s1),
+              Expanded(child: Text(promo.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.onChrome, fontWeight: FontWeight.w700))),
+            ]),
+            const SizedBox(height: Space.s2),
+            Text('Se termine dans', style: TextStyle(color: t.onChromeMuted, fontSize: 12)),
+            const SizedBox(height: Space.s1),
+            Countdown(end: end, color: t.onChrome, boxColor: t.chromeRaised, compact: true),
+          ]),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.s2),
+      child: Text(
+        '${promo.label}${end != null ? " · jusqu'au ${formatDate(end)}" : ''}',
+        style: TextStyle(color: t.textMuted, fontSize: 13),
+      ),
+    );
+  }
+}
+
 /// Barre d'achat collée en bas : quantité bornée de 1 au stock, ajout.
 class _BuyBar extends ConsumerStatefulWidget {
   const _BuyBar({required this.offer});
@@ -330,8 +403,23 @@ class _BuyBarState extends ConsumerState<_BuyBar> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final o = widget.offer;
+    final unit = o.unitPriceFor(_quantity);
+    final next = o.usefulTiers.where((tier) => tier.minQuantity > _quantity).firstOrNull;
+    // Prix par quantité : le palier atteint et le suivant.
+    final hint = o.isOutOfStock || o.usefulTiers.isEmpty
+        ? null
+        : [
+            if (unit < o.effectivePrice) '${formatPrice(unit)} l’unité à cette quantité',
+            if (next != null) '${formatPrice(next.unitPrice)} dès ${next.minQuantity}',
+          ].join(' · ');
     return BottomActionBar(
-      child: Row(children: [
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (hint != null && hint.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.s2),
+            child: Text(hint, textAlign: TextAlign.center, style: TextStyle(color: t.textMuted, fontSize: 12.5)),
+          ),
+        Row(children: [
         QuantityStepper(value: _quantity, max: o.stock < 1 ? 1 : o.stock, onChanged: o.isOutOfStock ? null : (q) => setState(() => _quantity = q)),
         const SizedBox(width: Space.s3),
         Expanded(
@@ -341,10 +429,11 @@ class _BuyBarState extends ConsumerState<_BuyBar> {
                 ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: t.primaryText))
                 : FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(o.isOutOfStock ? 'Indisponible' : 'Ajouter · ${formatPrice(o.effectivePrice * _quantity)}', maxLines: 1),
+                    child: Text(o.isOutOfStock ? 'Indisponible' : 'Ajouter · ${formatPrice(unit * _quantity)}', maxLines: 1),
                   ),
           ),
         ),
+        ]),
       ]),
     );
   }

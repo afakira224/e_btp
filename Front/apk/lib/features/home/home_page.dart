@@ -22,6 +22,7 @@ import '../catalog/browse/browse_pages.dart';
 import '../catalog/shared/catalog_api.dart';
 import '../catalog/shared/product_card.dart';
 import '../catalog/shared/product_grid.dart';
+import '../catalog/shared/sponsored_rail.dart';
 import '../shops/shops_pages.dart';
 import '../wishlist/shared/wishlist_controller.dart';
 
@@ -44,6 +45,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       PagedController((page) => ref.read(catalogApiProvider).search(const ListingQuery(), page, 8), idOf: (o) => o.id);
 
   static const _newest = (ListingQuery(sort: ListingSort.newest), 8);
+  static const _homeSlot = SponsoredSlot('home');
 
   @override
   void dispose() {
@@ -55,8 +57,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref
       ..invalidate(categoriesProvider)
       ..invalidate(listingPreviewProvider(_newest))
-      ..invalidate(featuredProvider)
+      ..invalidate(bestSellersProvider)
       ..invalidate(flashSalesProvider)
+      ..invalidate(campaignsProvider)
+      ..invalidate(sponsoredProvider(_homeSlot))
       ..invalidate(_shopsPreviewProvider);
     await _recommended.refresh();
   }
@@ -65,7 +69,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final newest = ref.watch(listingPreviewProvider(_newest));
-    final featured = ref.watch(featuredProvider);
+    final featured = ref.watch(bestSellersProvider);
     final categories = ref.watch(categoriesProvider);
     final user = ref.watch(authProvider).user;
     final favorites = ref.watch(wishlistCountProvider);
@@ -114,6 +118,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                     RayonBubbles(items: [for (final c in list) (c.id, c.nom, () => context.openCategorie(c.id))]),
                   ]),
                 ),
+              ),
+              const SliverToBoxAdapter(
+                child: SponsoredRail(slot: _homeSlot, padding: EdgeInsets.zero),
               ),
               SliverToBoxAdapter(
                 child: ProductRail(
@@ -233,6 +240,7 @@ class _BannersState extends ConsumerState<_Banners> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final sale = ref.watch(flashSalesProvider).value?.firstOrNull;
+    final campaigns = (ref.watch(campaignsProvider).value ?? const <Campaign>[]).where((c) => c.isRunning && c.offerCount > 0).toList();
     final signedIn = ref.watch(authProvider).isAuthenticated;
     final banners = [
       if (sale != null)
@@ -246,7 +254,16 @@ class _BannersState extends ConsumerState<_Banners> {
         )
       else
         _Banner(title: 'Tout le chantier, au même endroit', text: 'Ciment, fer, carrelage, outillage : les dépôts de Conakry.', icon: Icons.foundation, dark: true, onTap: (c) => c.go('/catalogue')),
-      _Banner(title: "Jusqu'à −20 % en déstockage", text: 'Fins de série et surplus de dépôt, quantités limitées.', icon: Icons.local_offer_outlined, onTap: (c) => c.openShared('promotions')),
+      // Campagnes de la plateforme : les boutiques y inscrivent leurs remises.
+      for (final c in campaigns)
+        _Banner(
+          title: c.nom,
+          text: '${c.description ?? 'Remises des boutiques'} · ${plural(c.offerCount, 'offre')}, jusqu’au ${formatDate(c.endDate)}',
+          icon: Icons.campaign_outlined,
+          onTap: (ctx) => ctx.openCampaign(c.slug),
+        ),
+      if (campaigns.isEmpty)
+        _Banner(title: 'Les promotions du moment', text: 'Remises des boutiques, ventes flash et prix par quantité.', icon: Icons.local_offer_outlined, onTap: (c) => c.openShared('promotions')),
       _Banner(
         title: 'Compte professionnel',
         text: 'Tarifs négociés et paiement à 30 jours pour vos chantiers.',
@@ -346,13 +363,21 @@ class _TopSellers extends StatelessWidget {
       ));
       if (i < items.length - 1) rows.add(const Divider(indent: Space.s4));
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SectionHeader(title: 'Meilleures ventes', subtitle: 'Les plus plébiscités', onMore: () => context.openShared('meilleures-ventes')),
-      Padding(
-        padding: EdgeInsets.symmetric(horizontal: context.gutter),
-        child: loading ? const Skeleton(height: 260) : AppCard(padding: EdgeInsets.zero, child: Column(children: rows)),
-      ),
-    ]);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(title: 'Meilleures ventes', subtitle: 'Les plus vendus ces 30 derniers jours', onMore: () => context.openShared('meilleures-ventes')),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: context.gutter),
+          child: loading
+              ? const Skeleton(height: 260)
+              : AppCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(children: rows),
+                ),
+        ),
+      ],
+    );
   }
 }
 

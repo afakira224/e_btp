@@ -28,12 +28,19 @@ String randomToken() {
 }
 
 class MockDb {
-  MockDb._(this._prefs, this.data);
+  MockDb._(this._prefs, this.data, {this.fresh = false});
 
   static const _key = 'btp.mock.db';
 
   final SharedPreferences _prefs;
   final Map<String, dynamic> data;
+
+  /// Base créée à ce lancement (jeu de démonstration neuf).
+  final bool fresh;
+
+  /// Version du schéma : 2 = sous-commandes par boutique, support, promotions.
+  int get version => (data['version'] as num?)?.toInt() ?? 1;
+  set version(int value) => data['version'] = value;
 
   static Future<MockDb> open(MockSeed seed) async {
     final prefs = await SharedPreferences.getInstance();
@@ -45,7 +52,7 @@ class MockDb {
         // Base illisible : on repart d'un jeu neuf.
       }
     }
-    final db = MockDb._(prefs, _seed(seed));
+    final db = MockDb._(prefs, _seed(seed), fresh: true);
     await db.save();
     return db;
   }

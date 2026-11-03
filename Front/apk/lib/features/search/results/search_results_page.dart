@@ -16,6 +16,7 @@ import '../../../shared/utils/format.dart';
 import '../../catalog/shared/catalog_api.dart';
 import '../../catalog/shared/listing_screen.dart';
 import '../../catalog/shared/product_grid.dart';
+import '../../catalog/shared/sponsored_rail.dart';
 
 // ─────────────────────────────────────────────
 //  Résultats de recherche — critères lus dans l'URL (mêmes paramètres que
@@ -157,6 +158,7 @@ class _SearchResultsPageState extends ConsumerState<SearchResultsPage> {
                 ),
               ),
             ),
+            if (q != null) SponsoredSliver(slot: SponsoredSlot('search', q: q)),
             PagedProductSliver(
               controller: _paged,
               emptyTitle: _filterCount > 0 ? 'Aucun résultat avec ces filtres' : 'Aucun résultat${q != null ? ' pour « $q »' : ''}',

@@ -45,10 +45,12 @@ class _OrdersPageState extends ConsumerState<OrdersPage> {
         title: const Text('Mes commandes'),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(52),
-          child: ChipRow(chips: [
-            ChipItem('Toutes', active: _status == null, onTap: () => _filter(null)),
-            for (final s in OrderStatus.values) ChipItem(s.filterLabel, active: _status == s, onTap: () => _filter(s)),
-          ]),
+          child: ChipRow(
+            chips: [
+              ChipItem('Toutes', active: _status == null, onTap: () => _filter(null)),
+              for (final s in OrderStatus.filters) ChipItem(s.filterLabel, active: _status == s, onTap: () => _filter(s)),
+            ],
+          ),
         ),
       ),
       body: RefreshIndicator(

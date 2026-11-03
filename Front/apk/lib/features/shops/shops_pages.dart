@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/navigation.dart';
@@ -17,6 +18,7 @@ import '../../shared/ui/thumbnail.dart';
 import '../../shared/utils/format.dart';
 import '../catalog/shared/catalog_api.dart';
 import '../catalog/shared/listing_screen.dart';
+import '../catalog/shared/product_grid.dart';
 
 // ─────────────────────────────────────────────
 //  RÈGLE ABSOLUE : le numéro de téléphone d'une boutique n'est jamais
@@ -384,9 +386,12 @@ class _ShopViewState extends ConsumerState<_ShopView> {
                 query: ListingQuery(boutiqueId: s.id, q: _q.isEmpty ? null : _q, discounted: _promo),
                 familleChips: true,
                 chips: [ChipItem('En promotion', icon: Icons.local_offer_outlined, active: _promo, onTap: () => setState(() => _promo = !_promo))],
-                header: Padding(
-                  padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, 0),
-                  child: TextField(
+                header: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // Produits phares : la vitrine choisie par la boutique.
+                  if (_q.isEmpty && !_promo) ProductRail(title: 'Produits phares', items: ref.watch(shopFeaturedProvider(s.id)).value ?? const []),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, 0),
+                    child: TextField(
                     controller: _search,
                     onChanged: _onSearch,
                     textInputAction: TextInputAction.search,
@@ -405,7 +410,8 @@ class _ShopViewState extends ConsumerState<_ShopView> {
                             ),
                     ),
                   ),
-                ),
+                  ),
+                ]),
                 emptyTitle: _q.isNotEmpty || _promo ? 'Aucun article trouvé' : 'Rien en rayon pour le moment',
                 emptyText: _q.isNotEmpty || _promo ? 'Retirez un filtre ou cherchez un terme plus général.' : 'Les premiers articles apparaîtront ici dès leur publication.',
               ),
@@ -445,13 +451,13 @@ class _Stat extends StatelessWidget {
 }
 
 /// Onglet Infos : coordonnées (adresse, e-mail) — jamais de téléphone.
-class _ShopInfo extends StatelessWidget {
+class _ShopInfo extends ConsumerWidget {
   const _ShopInfo({required this.shop});
 
   final Shop shop;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.tokens;
     final s = shop;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -488,6 +494,18 @@ class _ShopInfo extends StatelessWidget {
         const SizedBox(height: Space.s5),
         ListGroup(children: [ListRow(icon: Icons.event_outlined, title: 'Sur la plateforme depuis', value: formatMonthYear(s.createdAt!))]),
       ],
+      const SizedBox(height: Space.s5),
+      // Contrefaçon, comportement abusif, demande de paiement hors plateforme : l'équipe examine.
+      ListGroup(children: [
+        ListRow(
+          icon: Icons.flag_outlined,
+          title: 'Signaler cette boutique',
+          onTap: () {
+            if (!requireSession(context, ref)) return;
+            context.push('/compte/support/nouvelle?${Uri(queryParameters: {'type': 'shop_report', 'cible': s.id, 'libelle': s.nom}).query}');
+          },
+        ),
+      ]),
     ]);
   }
 }

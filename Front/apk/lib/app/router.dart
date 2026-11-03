@@ -10,6 +10,7 @@ import '../features/account/orders/orders_page.dart';
 import '../features/account/overview/account_home_page.dart';
 import '../features/account/profile/profile_page.dart';
 import '../features/account/settings/settings_page.dart';
+import '../features/account/shop_request/shop_request_pages.dart';
 import '../features/auth/forgot_password/forgot_password_page.dart';
 import '../features/auth/forgot_password/reset_password_page.dart';
 import '../features/auth/login/login_page.dart';
@@ -18,8 +19,11 @@ import '../features/auth/shared/auth_widgets.dart';
 import '../features/auth/signup/signup_page.dart';
 import '../features/auth/verify_email/verify_email_page.dart';
 import '../features/cart/cart_page.dart';
+import '../features/cart/checkout_page.dart';
+import '../features/cart/payment_page.dart';
 import '../features/cart/shared/cart_controller.dart';
 import '../features/catalog/browse/browse_pages.dart';
+import '../features/catalog/lists/campaign_page.dart';
 import '../features/catalog/lists/list_pages.dart';
 import '../features/catalog/product/product_page.dart';
 import '../features/home/home_page.dart';
@@ -27,11 +31,13 @@ import '../features/search/results/search_results_page.dart';
 import '../features/search/search_bar/search_input_page.dart';
 import '../features/search/shared/search_state.dart';
 import '../features/shops/shops_pages.dart';
+import '../features/support/support_pages.dart';
 import '../features/welcome/onboarding_page.dart';
 import '../features/welcome/splash_page.dart';
 import '../features/welcome/welcome_page.dart';
 import '../features/wishlist/wishlist_page.dart';
 import '../shared/ui/responsive.dart';
+import '../entities/support.dart';
 import '../shared/ui/states.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.dart';
@@ -48,22 +54,49 @@ import 'theme/tokens.dart';
 
 /// Écrans accessibles depuis n'importe quel onglet.
 List<RouteBase> _sharedRoutes() => [
-      GoRoute(path: 'produits/:offreId', builder: (_, s) => ProductPage(id: s.pathParameters['offreId']!)),
-      GoRoute(path: 'boutique/:boutiqueId', builder: (_, s) => ShopPage(id: s.pathParameters['boutiqueId']!)),
-      GoRoute(path: 'familles/:id', builder: (_, s) => FamillePage(id: s.pathParameters['id']!)),
-      GoRoute(path: 'categories/:id', builder: (_, s) => CategoriePage(id: s.pathParameters['id']!)),
-      GoRoute(path: 'sous-categories/:id', builder: (_, s) => SousCategoriePage(id: s.pathParameters['id']!)),
-      // La saisie avant les résultats : deux écrans frères, pas empilés.
-      GoRoute(path: 'recherche/saisie', builder: (_, s) => SearchInputPage(initial: s.uri.queryParameters['q'] ?? '')),
-      GoRoute(
-        path: 'recherche',
-        // Une nouvelle recherche = un nouvel écran : la clé suit la requête.
-        pageBuilder: (_, s) => MaterialPage(key: ValueKey(s.uri.toString()), child: SearchResultsPage(initial: parseSearchParams(s.uri.queryParameters))),
-      ),
-      GoRoute(path: 'nouveautes', builder: (_, _) => const NewArrivalsPage()),
-      GoRoute(path: 'meilleures-ventes', builder: (_, _) => const BestSellersPage()),
-      GoRoute(path: 'promotions', builder: (_, _) => const PromotionsPage()),
-    ];
+  // `src` : d'où vient la visite (`boost:<id>` pour un produit sponsorisé).
+  GoRoute(
+    path: 'produits/:offreId',
+    builder: (_, s) => ProductPage(id: s.pathParameters['offreId']!, src: s.uri.queryParameters['src']),
+  ),
+  GoRoute(
+    path: 'boutique/:boutiqueId',
+    builder: (_, s) => ShopPage(id: s.pathParameters['boutiqueId']!),
+  ),
+  GoRoute(
+    path: 'familles/:id',
+    builder: (_, s) => FamillePage(id: s.pathParameters['id']!),
+  ),
+  GoRoute(
+    path: 'categories/:id',
+    builder: (_, s) => CategoriePage(id: s.pathParameters['id']!),
+  ),
+  GoRoute(
+    path: 'sous-categories/:id',
+    builder: (_, s) => SousCategoriePage(id: s.pathParameters['id']!),
+  ),
+  // La saisie avant les résultats : deux écrans frères, pas empilés.
+  GoRoute(
+    path: 'recherche/saisie',
+    builder: (_, s) => SearchInputPage(initial: s.uri.queryParameters['q'] ?? ''),
+  ),
+  GoRoute(
+    path: 'recherche',
+    // Une nouvelle recherche = un nouvel écran : la clé suit la requête.
+    pageBuilder: (_, s) => MaterialPage(
+      key: ValueKey(s.uri.toString()),
+      child: SearchResultsPage(initial: parseSearchParams(s.uri.queryParameters)),
+    ),
+  ),
+  GoRoute(path: 'nouveautes', builder: (_, _) => const NewArrivalsPage()),
+  GoRoute(path: 'meilleures-ventes', builder: (_, _) => const BestSellersPage()),
+  GoRoute(path: 'promotions', builder: (_, _) => const PromotionsPage()),
+  GoRoute(
+    path: 'campagnes/:slug',
+    builder: (_, s) => CampaignPage(slug: s.pathParameters['slug']!),
+  ),
+  GoRoute(path: 'contact', builder: (_, _) => const ContactPage()),
+];
 
 StatefulShellBranch _branch(String root, Widget page, [List<RouteBase> extra = const []]) => StatefulShellBranch(routes: [
       GoRoute(path: '/$root', builder: (_, _) => page, routes: [...extra, ..._sharedRoutes()]),
@@ -86,22 +119,32 @@ String? _fromWebPath(Uri uri) {
     final id = Uri.encodeComponent(s[1]);
     switch (s[0]) {
       case 'produits':
-        return '/accueil/produits/$id';
+        return '/accueil/produits/$id$q';
       case 'boutiques':
         return '/boutiques/boutique/$id';
       case 'familles' || 'categories' || 'sous-categories':
         return '/catalogue/${s[0]}/$id';
+      case 'campagnes':
+        return '/accueil/campagnes/$id';
+      case 'paiement':
+        return '/panier/paiement/$id';
     }
   }
   if (s.length == 1) {
     switch (s[0]) {
       case 'familles' || 'categories':
         return '/catalogue';
-      case 'recherche' || 'nouveautes' || 'meilleures-ventes' || 'promotions':
+      case 'recherche' || 'nouveautes' || 'meilleures-ventes' || 'promotions' || 'contact':
         return '/accueil/${s[0]}$q';
       case 'favoris':
         return '/compte/favoris';
+      case 'commande':
+        return '/panier/commande';
     }
+  }
+  // La demande d'ouverture : `/compte/boutique` sur le site.
+  if (s.length >= 2 && s[0] == 'compte' && s[1] == 'boutique' && (s.length == 2 || s[2] == 'demande')) {
+    return s.length == 2 ? '/compte/vendre' : '/compte/vendre/demande';
   }
   return null;
 }
@@ -152,10 +195,25 @@ final routerProvider = Provider<GoRouter>((ref) {
           _branch('accueil', const HomePage()),
           _branch('catalogue', const DomainesPage()),
           _branch('boutiques', const ShopsPage()),
-          _branch('panier', const CartPage()),
+          _branch('panier', const CartPage(), [
+            GoRoute(path: 'commande', builder: (_, _) => const CheckoutPage()),
+            GoRoute(
+              path: 'paiement/:orderId',
+              builder: (_, s) => PaymentPage(orderId: s.pathParameters['orderId']!),
+            ),
+            GoRoute(path: 'adresse', builder: (_, _) => const AddressFormPage()),
+          ]),
           _branch('compte', const AccountHomePage(), [
             GoRoute(path: 'commandes', builder: (_, _) => const OrdersPage()),
-            GoRoute(path: 'commandes/:orderId', builder: (_, s) => OrderDetailPage(id: s.pathParameters['orderId']!)),
+            // `ok` : le message à afficher en arrivant (commande passée, paiement).
+            GoRoute(
+              path: 'commandes/:orderId',
+              builder: (_, s) => OrderDetailPage(id: s.pathParameters['orderId']!, feedback: s.uri.queryParameters['ok']),
+            ),
+            GoRoute(
+              path: 'commandes/:orderId/paiement',
+              builder: (_, s) => PaymentPage(orderId: s.pathParameters['orderId']!),
+            ),
             GoRoute(path: 'adresses', builder: (_, _) => const AddressesPage()),
             GoRoute(path: 'adresses/nouvelle', builder: (_, _) => const AddressFormPage()),
             GoRoute(path: 'adresses/:addressId/modifier', builder: (_, s) => AddressFormPage(addressId: s.pathParameters['addressId'])),
@@ -163,6 +221,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             GoRoute(path: 'parametres', builder: (_, _) => const SettingsPage()),
             GoRoute(path: 'parametres/mot-de-passe', builder: (_, _) => const ChangePasswordPage()),
             GoRoute(path: 'favoris', builder: (_, _) => const WishlistPage()),
+            GoRoute(path: 'support', builder: (_, _) => const SupportPage()),
+            GoRoute(
+              path: 'support/nouvelle',
+              builder: (_, s) =>
+                  NewTicketPage(type: SupportTicketType.parse(s.uri.queryParameters['type'] ?? ''), targetId: s.uri.queryParameters['cible'], targetLabel: s.uri.queryParameters['libelle']),
+            ),
+            GoRoute(
+              path: 'support/:ticketId',
+              builder: (_, s) => TicketPage(id: s.pathParameters['ticketId']!),
+            ),
+            GoRoute(path: 'vendre', builder: (_, _) => const ShopRequestPage()),
+            GoRoute(path: 'vendre/demande', builder: (_, _) => const ShopRequestFormPage()),
           ]),
         ],
       ),

@@ -55,12 +55,64 @@ class PriceLine extends StatelessWidget {
           formatPrice(offer.effectivePrice),
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: large ? 26 : 15, color: t.text, letterSpacing: large ? -0.5 : 0, fontFeatures: const [FontFeature.tabularFigures()]),
         ),
-        if (offer.hasDiscount)
+        // Le prix barré est le plus bas des 30 derniers jours : sans lui, pas de prix barré.
+        if (offer.referencePrice case final reference? when reference > offer.effectivePrice)
           Padding(
             padding: EdgeInsets.only(bottom: large ? 3 : 1),
-            child: Text(formatPrice(offer.price), style: TextStyle(color: t.textMuted, fontSize: large ? 14 : 11.5, decoration: TextDecoration.lineThrough)),
+            child: Text(formatPrice(reference), style: TextStyle(color: t.textMuted, fontSize: large ? 14 : 11.5, decoration: TextDecoration.lineThrough)),
           ),
       ],
+    );
+  }
+}
+
+/// « Sponsorisé · Pourquoi je vois ceci ? » : la boutique paie cette place.
+class SponsoredLabel extends StatelessWidget {
+  const SponsoredLabel({super.key, required this.sponsored});
+
+  final Sponsored sponsored;
+
+  static Future<void> explain(BuildContext context, Sponsored sponsored) => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) {
+          final t = context.tokens;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Space.s5, 0, Space.s5, Space.s5),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Pourquoi je vois ceci ?', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: Space.s3),
+                Text(sponsored.why, style: const TextStyle(height: 1.45)),
+                const SizedBox(height: Space.s3),
+                Text(
+                  'Un produit sponsorisé est montré en priorité, jamais plus de trois fois par jour à la même personne. Son prix et ses conditions sont les mêmes que sans la mise en avant.',
+                  style: TextStyle(color: t.textMuted, fontSize: 13, height: 1.45),
+                ),
+              ]),
+            ),
+          );
+        },
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Semantics(
+      button: true,
+      label: 'Sponsorisé. Pourquoi je vois ceci ?',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => explain(context, sponsored),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('Sponsorisé', style: TextStyle(color: t.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 3),
+            Icon(Icons.info_outline, size: 13, color: t.textMuted),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -125,7 +177,7 @@ class _ProductCardState extends ConsumerState<ProductCard> with OfferActions<Pro
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md), side: BorderSide(color: t.border.withValues(alpha: 0.6))),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: () => context.openOffer(offer.id),
+            onTap: () => context.openOffer(offer.id, src: offer.sponsored == null ? null : 'boost:${offer.sponsored!.boostId}'),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Stack(children: [
                 ProductThumbnail(url: offer.image, seed: offer.id, borderRadius: top),
@@ -140,7 +192,7 @@ class _ProductCardState extends ConsumerState<ProductCard> with OfferActions<Pro
                   left: Space.s2,
                   top: Space.s2,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    if (percent != null) BtpBadge('−${formatPercent(percent)}', tone: BadgeTone.accent),
+                    if (percent != null) BtpBadge('${offer.isFlashSale ? '⚡ ' : ''}−${formatPercent(percent)}', tone: BadgeTone.accent),
                     if (offer.isNew && widget.tag == null) ...[const SizedBox(height: Space.s1), const BtpBadge('Nouveau', tone: BadgeTone.neutral)],
                   ]),
                 ),
@@ -172,7 +224,8 @@ class _ProductCardState extends ConsumerState<ProductCard> with OfferActions<Pro
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(Space.s3, Space.s2, Space.s3, Space.s3),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(offer.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13.5, color: t.text, height: 1.3)),
+                    if (offer.sponsored != null) SponsoredLabel(sponsored: offer.sponsored!),
+                    Text(offer.name, maxLines: offer.sponsored != null ? 1 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13.5, color: t.text, height: 1.3)),
                     if (offer.rating != null) ...[const SizedBox(height: 3), RatingStars(value: offer.rating!, count: offer.reviewsCount, size: 11.5)],
                     const Spacer(),
                     PriceLine(offer: offer),

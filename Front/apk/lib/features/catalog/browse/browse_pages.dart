@@ -232,6 +232,7 @@ class FamillePage extends ConsumerWidget {
     return ListingScreen(
       title: f?.nom ?? '',
       query: ListingQuery(familleId: id),
+      sponsored: 'category',
       header: RayonBubbles(items: [for (final c in f?.categories ?? const <Categorie>[]) (c.id, c.nom, () => context.openCategorie(c.id))]),
     );
   }
@@ -259,6 +260,7 @@ class _CategoriePageState extends ConsumerState<CategoriePage> {
     return ListingScreen(
       title: c?.nom ?? '',
       query: _sous == null ? ListingQuery(categoryId: widget.id) : ListingQuery(sousCategoryId: _sous),
+      sponsored: 'category',
       chips: sous.isEmpty
           ? null
           : [
@@ -278,7 +280,11 @@ class SousCategoriePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final sous = ref.watch(sousCategorieProvider(id));
     if (sous.hasError) return _NotFound(what: 'Rayon', error: sous.error!);
-    return ListingScreen(title: sous.value?.nom ?? '', query: ListingQuery(sousCategoryId: id));
+    return ListingScreen(
+      title: sous.value?.nom ?? '',
+      query: ListingQuery(sousCategoryId: id),
+      sponsored: 'category',
+    );
   }
 }
 

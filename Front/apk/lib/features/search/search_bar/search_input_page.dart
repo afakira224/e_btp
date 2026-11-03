@@ -263,10 +263,19 @@ class PriceText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    return Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-      Text(formatPrice(offer.effectivePrice), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-      if (offer.hasDiscount) Text(formatPrice(offer.price), style: TextStyle(fontSize: 11, color: t.textMuted, decoration: TextDecoration.lineThrough)),
-    ]);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(formatPrice(offer.effectivePrice), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+        if (offer.referencePrice case final reference? when reference > offer.effectivePrice)
+          Text(
+            formatPrice(reference),
+            style: TextStyle(fontSize: 11, color: t.textMuted, decoration: TextDecoration.lineThrough),
+          ),
+      ],
+    );
   }
 }
 

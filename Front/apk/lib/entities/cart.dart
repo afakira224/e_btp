@@ -15,6 +15,9 @@ class CartItem {
     required this.price,
     this.discountPrice,
     required this.unitPrice,
+    this.addedUnitPrice,
+    this.savings = 0,
+    this.promotionLabel,
     required this.quantity,
     required this.stock,
     required this.lineTotal,
@@ -28,30 +31,47 @@ class CartItem {
   final double price;
   final double? discountPrice;
 
-  /// Prix unitaire figé au moment de l'ajout.
+  /// Prix unitaire en vigueur pour cette quantité : promotion et palier
+  /// compris. Le checkout le recalcule.
   final double unitPrice;
+
+  /// Prix unitaire vu à l'ajout ; différent quand une promotion a commencé ou fini depuis.
+  final double? addedUnitPrice;
+
+  /// Économie de la ligne par rapport au prix de base.
+  final double savings;
+
+  /// Promotion qui fixe le prix de la ligne.
+  final String? promotionLabel;
   final int quantity;
   final int stock;
   final double lineTotal;
 
   bool get exceedsStock => quantity > stock;
+
+  /// Le prix a-t-il bougé depuis l'ajout ? Autant le dire avant le paiement.
+  bool get priceChanged => addedUnitPrice != null && addedUnitPrice != unitPrice;
+  double get priceDelta => unitPrice - (addedUnitPrice ?? unitPrice);
   bool get isOutOfStock => stock <= 0;
 
   factory CartItem.fromJson(Json j) => CartItem(
-        productBoutiqueId: str(j, 'productBoutiqueId'),
-        productName: strOrNull(j, 'productName'),
-        urlImages: strings(j, 'urlImages'),
-        price: number(j, 'price'),
-        discountPrice: numOrNull(j, 'discountPrice'),
-        unitPrice: number(j, 'unitPrice'),
-        quantity: integer(j, 'quantity'),
-        stock: integer(j, 'stock'),
-        lineTotal: number(j, 'lineTotal'),
-      );
+    productBoutiqueId: str(j, 'productBoutiqueId'),
+    productName: strOrNull(j, 'productName'),
+    urlImages: strings(j, 'urlImages'),
+    price: number(j, 'price'),
+    discountPrice: numOrNull(j, 'discountPrice'),
+    unitPrice: number(j, 'unitPrice'),
+    addedUnitPrice: numOrNull(j, 'addedUnitPrice'),
+    savings: number(j, 'savings'),
+    promotionLabel: strOrNull(object(object(j, 'pricing') ?? const {}, 'promotion') ?? const {}, 'label'),
+    quantity: integer(j, 'quantity'),
+    stock: integer(j, 'stock'),
+    lineTotal: number(j, 'lineTotal'),
+  );
 }
 
 class Cart {
-  const Cart({this.items = const [], this.totalItems = 0, this.totalAmount = 0});
+  const Cart({this.items = const [], this.totalItems = 0, this.totalAmount = 0, this.totalSavings = 0});
 
   static const empty = Cart();
 
@@ -59,13 +79,13 @@ class Cart {
   final int totalItems;
   final double totalAmount;
 
+  /// Économies du panier par rapport aux prix de base.
+  final double totalSavings;
+
   bool get hasBlockingIssue => items.any((i) => i.isOutOfStock || i.exceedsStock);
 
-  factory Cart.fromJson(Json j) => Cart(
-        items: objects(j, 'items').map(CartItem.fromJson).toList(),
-        totalItems: integer(j, 'totalItems'),
-        totalAmount: number(j, 'totalAmount'),
-      );
+  factory Cart.fromJson(Json j) =>
+      Cart(items: objects(j, 'items').map(CartItem.fromJson).toList(), totalItems: integer(j, 'totalItems'), totalAmount: number(j, 'totalAmount'), totalSavings: number(j, 'totalSavings'));
 }
 
 class WishlistItem {

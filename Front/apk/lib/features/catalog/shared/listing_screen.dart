@@ -11,6 +11,7 @@ import '../../../shared/ui/responsive.dart';
 import '../../../shared/utils/format.dart';
 import 'catalog_api.dart';
 import 'product_grid.dart';
+import 'sponsored_rail.dart';
 
 /// Puce de filtre : un libellé, un état, une action.
 class ChipItem {
@@ -80,6 +81,7 @@ class ListingBody extends ConsumerStatefulWidget {
     this.emptyText = "Les boutiques n'ont pas encore référencé d'article ici.",
     this.pageSize = 12,
     this.leadingSlivers = const [],
+    this.sponsored,
   });
 
   final ListingQuery query;
@@ -100,6 +102,10 @@ class ListingBody extends ConsumerStatefulWidget {
 
   /// Slivers placés en tête (SliverOverlapInjector d'un NestedScrollView).
   final List<Widget> leadingSlivers;
+
+  /// Emplacement sponsorisé de la liste (`category`, `search`, `promotions`) :
+  /// ses produits passent en tête de la grille, marqués « Sponsorisé ».
+  final String? sponsored;
 
   @override
   ConsumerState<ListingBody> createState() => _ListingBodyState();
@@ -175,6 +181,10 @@ class _ListingBodyState extends ConsumerState<ListingBody> {
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: Space.s3)),
+            if (widget.sponsored != null)
+              SponsoredSliver(
+                slot: SponsoredSlot(widget.sponsored!, q: _query.q, familleId: _query.familleId, categoryId: _query.categoryId, sousCategoryId: _query.sousCategoryId),
+              ),
             PagedProductSliver(
               controller: _paged,
               tag: widget.tag,
@@ -272,6 +282,7 @@ class ListingScreen extends StatelessWidget {
     this.emptyTitle = 'Aucun produit ici',
     this.emptyText = "Les boutiques n'ont pas encore référencé d'article ici.",
     this.pageSize = 12,
+    this.sponsored,
   });
 
   final String title;
@@ -284,23 +295,25 @@ class ListingScreen extends StatelessWidget {
   final String emptyTitle;
   final String emptyText;
   final int pageSize;
+  final String? sponsored;
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          actions: [IconButton(tooltip: 'Rechercher', icon: const Icon(Icons.search), onPressed: () => context.openSearch())],
-        ),
-        body: ListingBody(
-          query: query,
-          familleChips: familleChips,
-          chips: chips,
-          sorts: sorts,
-          header: header,
-          tag: tag,
-          emptyTitle: emptyTitle,
-          emptyText: emptyText,
-          pageSize: pageSize,
-        ),
-      );
+    appBar: AppBar(
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      actions: [IconButton(tooltip: 'Rechercher', icon: const Icon(Icons.search), onPressed: () => context.openSearch())],
+    ),
+    body: ListingBody(
+      query: query,
+      familleChips: familleChips,
+      chips: chips,
+      sorts: sorts,
+      header: header,
+      tag: tag,
+      emptyTitle: emptyTitle,
+      emptyText: emptyText,
+      pageSize: pageSize,
+      sponsored: sponsored,
+    ),
+  );
 }

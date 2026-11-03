@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/navigation.dart';
 import '../../../app/theme/tokens.dart';
 import '../../../entities/promotion.dart';
 import '../../../shared/ui/badge.dart';
@@ -34,28 +35,29 @@ class NewArrivalsPage extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-//  Meilleures ventes — tri `popular`. Le back ne connaît pas les volumes de
-//  ventes : le classement repose sur le nombre d'avis.
+//  Meilleures ventes — tri `best_sellers` : les unités livrées sur les 30
+//  derniers jours.
 // ─────────────────────────────────────────────
 class BestSellersPage extends StatelessWidget {
   const BestSellersPage({super.key});
 
   @override
   Widget build(BuildContext context) => ListingScreen(
-        title: 'Meilleures ventes',
-        query: const ListingQuery(sort: ListingSort.popular),
-        familleChips: true,
-        sorts: const [],
-        tag: (_, index) => 'N° ${index + 1}',
-        emptyTitle: 'Pas encore de classement',
-        emptyText: "Pas encore assez d'avis clients pour classer ce domaine.",
-      );
+    title: 'Meilleures ventes',
+    query: const ListingQuery(sort: ListingSort.bestSellers),
+    familleChips: true,
+    sorts: const [],
+    tag: (_, index) => 'N° ${index + 1}',
+    emptyTitle: 'Pas encore de classement',
+    emptyText: "Pas encore assez de ventes pour classer ce domaine.",
+  );
 }
 
 // ─────────────────────────────────────────────
-//  Promotions — ventes flash en cours (GET /promotions/flash/active), puis
-//  toutes les offres remisées (discounted=true). Le back ne sait pas trier
-//  par taux de remise : ce tri n'est pas proposé.
+//  Promotions — ventes flash en cours (GET /promotions/flash/active), les
+//  campagnes de la plateforme, puis toutes les offres remisées
+//  (discounted=true), triables par taux de remise. Les promotions
+//  sponsorisées passent en tête de la grille.
 // ─────────────────────────────────────────────
 class PromotionsPage extends ConsumerWidget {
   const PromotionsPage({super.key});
@@ -63,24 +65,103 @@ class PromotionsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final flash = ref.watch(flashSalesProvider);
+    final campaigns = (ref.watch(campaignsProvider).value ?? const <Campaign>[]).where((c) => c.isRunning && c.offerCount > 0).toList();
     return ListingScreen(
       title: 'Promotions',
-      query: const ListingQuery(discounted: true),
+      query: const ListingQuery(discounted: true, sort: ListingSort.discount),
       familleChips: true,
-      sorts: const [ListingSort.popular, ListingSort.priceAsc, ListingSort.priceDesc, ListingSort.newest],
+      sponsored: 'promotions',
+      sorts: const [ListingSort.discount, ListingSort.popular, ListingSort.priceAsc, ListingSort.priceDesc, ListingSort.newest],
       header: flash.when(
         // Rien n'est affirmé pendant le chargement.
         loading: () => Padding(padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, 0), child: const Skeleton(height: 180, radius: Radii.lg)),
         error: (_, _) => const SizedBox.shrink(),
-        data: (sales) => sales.isEmpty
+        data: (sales) => sales.isEmpty && campaigns.isEmpty
             ? const SizedBox.shrink()
             : Padding(
                 padding: EdgeInsets.fromLTRB(context.gutter, Space.s3, context.gutter, 0),
-                child: Column(children: [for (final s in sales) Padding(padding: const EdgeInsets.only(bottom: Space.s3), child: FlashSaleBanner(sale: s))]),
+                child: Column(
+                  children: [
+                    for (final s in sales)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: Space.s3),
+                        child: FlashSaleBanner(sale: s),
+                      ),
+                    for (final c in campaigns)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: Space.s3),
+                        child: CampaignBanner(campaign: c, onTap: () => context.openCampaign(c.slug)),
+                      ),
+                  ],
+                ),
               ),
       ),
       emptyTitle: 'Aucune remise ici',
       emptyText: 'Revenez bientôt : les dépôts publient régulièrement de nouvelles offres.',
+    );
+  }
+}
+
+/// Bandeau d'une campagne de la plateforme : nom, accroche, offres, fin.
+class CampaignBanner extends StatelessWidget {
+  const CampaignBanner({super.key, required this.campaign, this.onTap});
+
+  final Campaign campaign;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final c = campaign;
+    return Material(
+      color: t.surfaceAlt,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        side: BorderSide(color: t.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(Space.s4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.campaign_outlined, color: t.text, size: 20),
+                  const SizedBox(width: Space.s1),
+                  Text(
+                    'Campagne',
+                    style: TextStyle(color: t.text, fontWeight: FontWeight.w700),
+                  ),
+                  const Spacer(),
+                  if (c.minDiscount > 0) BtpBadge('Dès −${formatPercent(c.minDiscount)}', tone: BadgeTone.accent),
+                ],
+              ),
+              const SizedBox(height: Space.s2),
+              Text(
+                c.nom,
+                style: TextStyle(color: t.text, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3),
+              ),
+              if (c.description != null) ...[
+                const SizedBox(height: Space.s1),
+                Text(
+                  c.description!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.textMuted),
+                ),
+              ],
+              const SizedBox(height: Space.s2),
+              Text(
+                c.isRunning ? '${plural(c.offerCount, 'offre')} · jusqu’au ${formatDate(c.endDate)}' : 'À partir du ${formatDate(c.startDate)}',
+                style: TextStyle(color: t.textMuted, fontSize: 12.5),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

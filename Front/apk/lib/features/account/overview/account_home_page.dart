@@ -9,10 +9,13 @@ import '../../../shared/config/env.dart';
 import '../../../shared/ui/kit.dart';
 import '../../../shared/ui/responsive.dart';
 import '../../../shared/utils/format.dart';
+import '../../../entities/user.dart';
 import '../../auth/shared/auth_controller.dart';
 import '../../cart/shared/cart_controller.dart';
 import '../../wishlist/shared/wishlist_controller.dart';
+import '../../support/shared/support_api.dart';
 import '../shared/account_api.dart';
+import '../shop_request/shop_request_pages.dart';
 
 // ─────────────────────────────────────────────
 //  Mon compte — profil en tête sur l'en-tête anthracite, chiffres clés,
@@ -56,6 +59,8 @@ class _AccountHomePageState extends ConsumerState<AccountHomePage> {
     final addresses = ref.watch(addressesProvider);
     final cartCount = ref.watch(cartCountProvider);
     final wishCount = ref.watch(wishlistCountProvider);
+    final openTickets = ref.watch(ticketsProvider(true)).value?.open;
+    final shopRequest = user.role == EntityType.shop ? null : ref.watch(myShopRequestsProvider).value?.firstOrNull;
     final defaultAddress = addresses.value?.where((a) => a.isDefault).firstOrNull ?? addresses.value?.firstOrNull;
 
     Widget stat(String value, String label, VoidCallback onTap) => Expanded(
@@ -78,7 +83,9 @@ class _AccountHomePageState extends ConsumerState<AccountHomePage> {
         onRefresh: () async {
           ref
             ..invalidate(accountOverviewProvider)
-            ..invalidate(addressesProvider);
+            ..invalidate(addressesProvider)
+            ..invalidate(ticketsProvider(true))
+            ..invalidate(myShopRequestsProvider);
           await ref.read(authProvider.notifier).refresh();
         },
         child: CustomScrollView(slivers: [
@@ -159,6 +166,29 @@ class _AccountHomePageState extends ConsumerState<AccountHomePage> {
                 ),
                 ListRow(icon: Icons.favorite_border, title: 'Mes favoris', value: '$wishCount', onTap: () => context.push('/compte/favoris')),
                 ListRow(icon: Icons.shopping_bag_outlined, title: 'Mon panier', value: '$cartCount', onTap: () => context.go('/panier')),
+              ]),
+              const SizedBox(height: Space.s5),
+              ListGroup(title: 'Aide', children: [
+                ListRow(
+                  icon: Icons.support_agent_outlined,
+                  title: 'Support',
+                  subtitle: 'Réclamations, signalements, questions',
+                  value: openTickets != null && openTickets > 0 ? '$openTickets en cours' : null,
+                  onTap: () => context.push('/compte/support'),
+                ),
+                ListRow(icon: Icons.mail_outline, title: 'Nous contacter', onTap: () => context.push('/compte/contact')),
+              ]),
+              const SizedBox(height: Space.s5),
+              ListGroup(title: 'Vendre', children: [
+                if (user.role == EntityType.shop)
+                  ListRow(icon: Icons.storefront_outlined, title: 'Espace boutique', subtitle: 'Sur le site web', trailing: const Icon(Icons.open_in_new, size: 18), onTap: () => openSellerConsole(context))
+                else
+                  ListRow(
+                    icon: Icons.storefront_outlined,
+                    title: shopRequest == null ? 'Vendre sur BTP' : 'Ma demande de boutique',
+                    subtitle: shopRequest == null ? 'Ouvrez votre boutique sur la plateforme' : '${shopRequest.nom} · ${shopRequest.status.label}',
+                    onTap: () => context.push('/compte/vendre'),
+                  ),
               ]),
               const SizedBox(height: Space.s5),
               ListGroup(title: 'Mon compte', children: [

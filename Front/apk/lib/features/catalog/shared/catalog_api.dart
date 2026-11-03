@@ -20,7 +20,9 @@ enum ListingSort {
   newest('newest', 'Nouveautés'),
   priceAsc('price_asc', 'Prix croissant'),
   priceDesc('price_desc', 'Prix décroissant'),
-  rating('rating', 'Mieux notés');
+  rating('rating', 'Mieux notés'),
+  bestSellers('best_sellers', 'Meilleures ventes'),
+  discount('discount', 'Plus fortes remises');
 
   const ListingSort(this.value, this.label);
   final String value;
@@ -40,6 +42,7 @@ class ListingQuery {
     this.inStock = false,
     this.discounted = false,
     this.boutiqueId,
+    this.campaignId,
   });
 
   final ListingSort sort;
@@ -53,18 +56,22 @@ class ListingQuery {
   final bool discounted;
   final String? boutiqueId;
 
+  /// Offres inscrites à une campagne de la plateforme.
+  final String? campaignId;
+
   Map<String, Object?> toParams() => {
-        'q': q,
-        'familleId': familleId,
-        'categoryId': categoryId,
-        'sousCategoryId': sousCategoryId,
-        'minPrice': minPrice,
-        'maxPrice': maxPrice,
-        'inStock': inStock ? 'true' : null,
-        'discounted': discounted ? 'true' : null,
-        'boutiqueId': boutiqueId,
-        'sort': sort.value,
-      };
+    'q': q,
+    'familleId': familleId,
+    'categoryId': categoryId,
+    'sousCategoryId': sousCategoryId,
+    'minPrice': minPrice,
+    'maxPrice': maxPrice,
+    'inStock': inStock ? 'true' : null,
+    'discounted': discounted ? 'true' : null,
+    'boutiqueId': boutiqueId,
+    'campaignId': campaignId,
+    'sort': sort.value,
+  };
 
   /// Clé stable : une liste repart de zéro quand elle change.
   String get key => toParams().toString();
@@ -79,19 +86,19 @@ class ListingQuery {
     int? Function()? maxPrice,
     bool? inStock,
     bool? discounted,
-  }) =>
-      ListingQuery(
-        sort: sort ?? this.sort,
-        q: q != null ? q() : this.q,
-        familleId: familleId != null ? familleId() : this.familleId,
-        categoryId: categoryId != null ? categoryId() : this.categoryId,
-        sousCategoryId: sousCategoryId != null ? sousCategoryId() : this.sousCategoryId,
-        minPrice: minPrice != null ? minPrice() : this.minPrice,
-        maxPrice: maxPrice != null ? maxPrice() : this.maxPrice,
-        inStock: inStock ?? this.inStock,
-        discounted: discounted ?? this.discounted,
-        boutiqueId: boutiqueId,
-      );
+  }) => ListingQuery(
+    sort: sort ?? this.sort,
+    q: q != null ? q() : this.q,
+    familleId: familleId != null ? familleId() : this.familleId,
+    categoryId: categoryId != null ? categoryId() : this.categoryId,
+    sousCategoryId: sousCategoryId != null ? sousCategoryId() : this.sousCategoryId,
+    minPrice: minPrice != null ? minPrice() : this.minPrice,
+    maxPrice: maxPrice != null ? maxPrice() : this.maxPrice,
+    inStock: inStock ?? this.inStock,
+    discounted: discounted ?? this.discounted,
+    boutiqueId: boutiqueId,
+    campaignId: campaignId,
+  );
 
   // Égalité de valeur : les providers « family » s'en servent comme clé.
   @override
@@ -99,6 +106,27 @@ class ListingQuery {
 
   @override
   int get hashCode => key.hashCode;
+}
+
+/// Emplacement sponsorisé et contexte de la page : texte cherché, rayon,
+/// fiche consultée. Valeur : sert de clé aux providers.
+class SponsoredSlot {
+  const SponsoredSlot(this.slot, {this.q, this.familleId, this.categoryId, this.sousCategoryId, this.offerId});
+
+  final String slot;
+  final String? q;
+  final String? familleId;
+  final String? categoryId;
+  final String? sousCategoryId;
+  final String? offerId;
+
+  Map<String, Object?> toParams() => {'slot': slot, 'q': q, 'familleId': familleId, 'categoryId': categoryId, 'sousCategoryId': sousCategoryId, 'offerId': offerId};
+
+  @override
+  bool operator ==(Object other) => other is SponsoredSlot && other.toParams().toString() == toParams().toString();
+
+  @override
+  int get hashCode => toParams().toString().hashCode;
 }
 
 class PriceRange {
@@ -149,18 +177,33 @@ class CatalogApi {
     return list.map(ProductBoutique.fromJson).toList();
   }
 
-  /// Détail d'une offre. Le back l'ajoute aux « récemment vus » d'un utilisateur connecté.
-  Future<ProductBoutique> offer(String id) async => ProductBoutique.fromJson((await _api.get('/product-boutiques/${Uri.encodeComponent(id)}')).map);
+  /// Détail d'une offre. Le back l'ajoute aux « récemment vus » d'un
+  /// utilisateur connecté ; venue d'une place sponsorisée (`src=boost:<id>`),
+  /// la visite est comptée au boost.
+  Future<ProductBoutique> offer(String id, {String? src}) async => ProductBoutique.fromJson((await _api.get('/product-boutiques/${Uri.encodeComponent(id)}${query_({'src': src})}')).map);
 
   /// Cascade de pertinence du back : sous-catégorie > catégorie > famille.
   Future<List<ProductBoutique>> suggestions(String id, {int limit = 8}) => _offers('/product-boutiques/${Uri.encodeComponent(id)}/suggestions?limit=$limit');
 
   Future<List<ProductBoutique>> shopOffers(String shopId) => _offers('/product-boutiques?boutiqueId=${Uri.encodeComponent(shopId)}&page=1&limit=10');
 
-  /// Meilleures ventes de l'accueil : offres mises en avant, les plus commentées d'abord.
-  Future<List<ProductBoutique>> featured() async {
-    final list = await _offers('/product-boutiques?isFeatured=true&page=1&limit=10');
-    return list..sort((a, b) => (b.reviewsCount ?? 0).compareTo(a.reviewsCount ?? 0));
+  /// Meilleures ventes de l'accueil : unités livrées sur 30 jours.
+  Future<List<ProductBoutique>> bestSellers({int limit = 10}) async => (await search(const ListingQuery(sort: ListingSort.bestSellers, inStock: true), 1, limit)).items;
+
+  /// Produits phares d'une boutique, dans l'ordre choisi par la boutique.
+  Future<List<ProductBoutique>> shopFeatured(String shopId) => _offers('/product-boutiques?boutiqueId=${Uri.encodeComponent(shopId)}&featured=true&page=1&limit=6');
+
+  /// Places sponsorisées d'un emplacement (`home`, `search`, `category`,
+  /// `similar`, `promotions`) ; chaque produit porte `sponsored`.
+  Future<List<ProductBoutique>> sponsored(SponsoredSlot slot) => _offers('/sponsored${query_(slot.toParams())}');
+
+  /// Campagnes de la plateforme en cours ou à venir.
+  Future<List<Campaign>> campaigns() async => (await _api.get('/campaigns')).list.cast<Map>().map((e) => Campaign.fromJson(e.cast())).toList();
+
+  /// Une campagne et ses offres, les plus fortes remises d'abord.
+  Future<(Campaign, List<ProductBoutique>)> campaign(String slug) async {
+    final data = (await _api.get('/campaigns/${Uri.encodeComponent(slug)}')).map;
+    return (Campaign.fromJson(data), objects(data, 'offers').map(ProductBoutique.fromJson).toList());
   }
 
   Future<List<ProductBoutique>> recentlyViewed(String userId) => _offers('/product-boutiques/recently-viewed/${Uri.encodeComponent(userId)}');
@@ -196,12 +239,18 @@ final categoriesProvider = FutureProvider<List<Categorie>>((ref) => ref.watch(ca
 final familleProvider = FutureProvider.autoDispose.family<Famille, String>((ref, id) => ref.watch(catalogApiProvider).famille(id));
 final categorieProvider = FutureProvider.autoDispose.family<Categorie, String>((ref, id) => ref.watch(catalogApiProvider).categorie(id));
 final sousCategorieProvider = FutureProvider.autoDispose.family<SousCategorie, String>((ref, id) => ref.watch(catalogApiProvider).sousCategorie(id));
-final offerProvider = FutureProvider.autoDispose.family<ProductBoutique, String>((ref, id) => ref.watch(catalogApiProvider).offer(id));
+
+/// Clé : l'offre et la place d'où vient la visite (`src`).
+final offerProvider = FutureProvider.autoDispose.family<ProductBoutique, (String, String?)>((ref, key) => ref.watch(catalogApiProvider).offer(key.$1, src: key.$2));
 final suggestionsProvider = FutureProvider.autoDispose.family<List<ProductBoutique>, String>((ref, id) => ref.watch(catalogApiProvider).suggestions(id));
 final shopOffersProvider = FutureProvider.autoDispose.family<List<ProductBoutique>, String>((ref, id) => ref.watch(catalogApiProvider).shopOffers(id));
 final shopProvider = FutureProvider.autoDispose.family<Shop, String>((ref, id) => ref.watch(catalogApiProvider).shop(id));
 final flashSalesProvider = FutureProvider.autoDispose<List<Promotion>>((ref) => ref.watch(catalogApiProvider).flashSales());
-final featuredProvider = FutureProvider.autoDispose<List<ProductBoutique>>((ref) => ref.watch(catalogApiProvider).featured());
+final bestSellersProvider = FutureProvider.autoDispose<List<ProductBoutique>>((ref) => ref.watch(catalogApiProvider).bestSellers());
+final shopFeaturedProvider = FutureProvider.autoDispose.family<List<ProductBoutique>, String>((ref, id) => ref.watch(catalogApiProvider).shopFeatured(id));
+final sponsoredProvider = FutureProvider.autoDispose.family<List<ProductBoutique>, SponsoredSlot>((ref, slot) => ref.watch(catalogApiProvider).sponsored(slot));
+final campaignsProvider = FutureProvider.autoDispose<List<Campaign>>((ref) => ref.watch(catalogApiProvider).campaigns());
+final campaignProvider = FutureProvider.autoDispose.family<(Campaign, List<ProductBoutique>), String>((ref, slug) => ref.watch(catalogApiProvider).campaign(slug));
 
 /// Première page d'une liste : aperçus (accueil, cartes boutique, décomptes).
 final listingPreviewProvider = FutureProvider.autoDispose.family<SearchPage, (ListingQuery, int)>(
