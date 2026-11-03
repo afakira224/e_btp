@@ -31,6 +31,12 @@ export const ROUTES = {
   sellerSupport: "/ma-boutique/:boutiqueId/support",
   sellerSupportNew: "/ma-boutique/:boutiqueId/support/nouvelle",
   sellerSupportTicket: "/ma-boutique/:boutiqueId/support/:ticketId",
+  sellerPromotions: "/ma-boutique/:boutiqueId/promotions",
+  sellerPromotionNew: "/ma-boutique/:boutiqueId/promotions/nouvelle",
+  sellerPromotionEdit: "/ma-boutique/:boutiqueId/promotions/:promotionId/modifier",
+  sellerBoosts: "/ma-boutique/:boutiqueId/mise-en-avant",
+  sellerBoostNew: "/ma-boutique/:boutiqueId/mise-en-avant/booster",
+  sellerBoost: "/ma-boutique/:boutiqueId/mise-en-avant/boosts/:boostId",
   sellerDelivery: "/ma-boutique/:boutiqueId/livraison",
   sellerInfo: "/ma-boutique/:boutiqueId/informations",
   // Administration : demandes d'ouverture de boutique, commandes et litiges,
@@ -42,6 +48,7 @@ export const ROUTES = {
   adminOrder: "/admin/commandes/:partId",
   adminSupport: "/admin/support",
   adminSupportTicket: "/admin/support/:ticketId",
+  adminMarketing: "/admin/promotions",
   panier: "/panier",
   // Tunnel de commande : livraison par boutique, adresse, paiement, confirmation.
   commande: "/commande",
@@ -52,6 +59,8 @@ export const ROUTES = {
   nouveautes: "/nouveautes",
   meilleuresVentes: "/meilleures-ventes",
   promotions: "/promotions",
+  // Campagne de la plateforme et les offres inscrites.
+  campagne: "/campagnes/:slug",
   boutiques: "/boutiques",
   boutique: "/boutiques/:boutiqueId",
   // Nous contacter : public, un visiteur y laisse son email.

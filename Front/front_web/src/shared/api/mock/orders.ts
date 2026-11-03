@@ -15,6 +15,8 @@ import type { ApiResponse } from "../httpClient";
 import type { MockOrder, MockShopOrder } from "./accountSeed";
 import { quoteDelivery, readSelection, summaryMethod, toOrderDeliveries } from "./deliveryRules";
 import { findLiveOffer } from "./liveCatalog";
+import { attributedBoost, recordBoostSales, usedCode } from "./marketing";
+import { evaluateCoupon, freeShippingRules, priceLines } from "./marketingPricing";
 import { objectId, writeDb, type MockDb } from "./mockDb";
 import { confirmPayment, failPayment, freshDb, sessionUser, toShopOrder, type Viewer } from "./shopOrders";
 import { allocateDiscount, DEADLINES, generatePickupCode, scheduleFor } from "./shopOrderRules";
@@ -136,8 +138,7 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
     errors.push(`Mode de paiement invalide. Valeurs acceptées : ${PAYMENT_METHODS.join(", ")}.`);
   }
   if (errors.length > 0) throw new ApiError(errors.join(" | "), 422);
-  // Les coupons vivent dans les promotions du back, que le mode simulé ne porte pas.
-  if (body.code !== undefined) throw new ApiError("Coupon introuvable", 404);
+  const code = typeof body.code === "string" && body.code.trim() ? body.code.trim().toUpperCase() : null;
   const online = body.paymentMethod === PaymentMethod.ONLINE;
 
   const db = freshDb();
@@ -162,10 +163,36 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
     throw new ApiError(`${suspended.nom} n'accepte pas de commande en ce moment : retirez ses articles pour commander.`, 400);
   }
 
+  // ── Prix du moment : une hausse depuis l'ajout se signale (409), une baisse s'applique.
+  const now = new Date();
+  const priced = priceLines(db, lines.map(({ item, offer }) => ({ offer: offer!, quantity: item.quantity })), now);
+  const raised = lines.filter(({ item }, index) => (priced[index]?.unitPrice ?? item.price) > item.price);
+  if (raised.length > 0) {
+    for (const [index, { item }] of lines.entries()) item.price = priced[index]?.unitPrice ?? item.price;
+    cart.amount = cart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    writeDb(db);
+    const names = raised.map(({ offer }) => `« ${offer!.product?.name ?? "un article"} »`);
+    throw new ApiError(`Le prix de ${names.join(", ")} a changé : vérifiez votre panier.`, 409);
+  }
+
+  // Livraison offerte : le seuil se lit sur la part de chaque boutique, remises comprises.
+  const partSubtotals = new Map<string, number>();
+  for (const [index, { item, offer }] of lines.entries()) {
+    const key = offer!.boutique?.id ?? "";
+    partSubtotals.set(key, (partSubtotals.get(key) ?? 0) + (priced[index]?.unitPrice ?? item.price) * item.quantity);
+  }
+  const freeShipping = new Map(
+    [...freeShippingRules(db, [...partSubtotals.keys()], now)].map(([shopId, rule]) => [
+      shopId,
+      { minAmount: rule.minAmount, subtotal: partSubtotals.get(shopId) ?? 0, label: rule.label },
+    ])
+  );
+
   // ── Livraisons : une par boutique ─────────
   const quote = quoteDelivery(
     lines.map(({ item, offer }) => ({ offer: offer!, quantity: item.quantity })),
-    selection
+    selection,
+    freeShipping
   );
   if (!quote.ready) {
     throw new ApiError(
@@ -199,7 +226,6 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
   }
 
   // ── Stock : vérifié puis réservé ──────────
-  const now = new Date();
   const stamp = now.toISOString();
   for (const { item, offer } of lines) {
     if (offer!.stock < item.quantity) {
@@ -213,12 +239,53 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
     else db.offerPatches[offer!.id] = { ...db.offerPatches[offer!.id], stock, updatedAt: stamp };
   }
 
-  const items = cart.items.map((item) => ({
-    productBoutiqueId: item.productBoutiqueId,
-    price: item.price,
-    quantity: item.quantity,
-  }));
+  const items = lines.map(({ item, offer }, index) => {
+    const line = priced[index]!;
+    return {
+      productBoutiqueId: item.productBoutiqueId,
+      price: line.unitPrice,
+      quantity: item.quantity,
+      basePrice: line.basePrice,
+      promotionId: line.promotionId,
+      ...(line.promotionLabel ? { promotionLabel: line.promotionLabel } : {}),
+      // Une visite d'un boost dans les 7 jours amène la vente.
+      boostId: attributedBoost(db, userId, offer!.id, now),
+    };
+  });
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  // ── Code : de la plateforme (réparti au prorata, payé par elle) ou d'une boutique (sur sa part seule).
+  let discountAmount = 0;
+  let couponShopId: string | null = null;
+  if (code) {
+    const promo = db.marketing.promotions.find((candidate) => candidate.code === code);
+    if (!promo) throw new ApiError("Coupon introuvable", 404);
+    const result = evaluateCoupon(
+      promo,
+      items.map((item, index) => ({
+        offerId: item.productBoutiqueId,
+        boutiqueId: lines[index]!.offer!.boutique?.id ?? "",
+        price: item.price,
+        quantity: item.quantity,
+        promoted: priced[index]?.promoted ?? false,
+      })),
+      now
+    );
+    if (result.error) throw new ApiError(result.error, 400);
+    if (promo.perCustomerLimit != null && usedCode(db, userId, code) >= promo.perCustomerLimit) {
+      throw new ApiError(promo.perCustomerLimit === 1 ? "Vous avez déjà utilisé ce code." : `Ce code s'utilise ${promo.perCustomerLimit} fois par client.`, 400);
+    }
+    discountAmount = result.discount;
+    couponShopId = result.boutiqueId;
+    promo.usedCount += 1;
+  }
+
+  // Ventes flash : la quantité vendue au prix flash est décomptée.
+  for (const [index, { item }] of lines.entries()) {
+    const flashId = priced[index]?.flashPromotionId;
+    const flash = flashId ? db.marketing.promotions.find((candidate) => candidate.id === flashId) : undefined;
+    if (flash) flash.flashSold += item.quantity;
+  }
   const status = online ? OrderStatus.AWAITING_PAYMENT : OrderStatus.IN_PROGRESS;
   const order: MockOrder = {
     id: objectId(),
@@ -226,10 +293,10 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
     reference: `CMD-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
     items,
     subtotal,
-    discountAmount: 0,
-    promotionCode: null,
+    discountAmount,
+    promotionCode: code,
     shippingFee: quote.shippingFee,
-    amount: subtotal + quote.shippingFee,
+    amount: Math.max(0, subtotal - discountAmount) + quote.shippingFee,
     status,
     statusHistory: [{ status, changedAt: stamp, note: "Commande créée" }],
     paymentMethod: online ? PaymentMethod.ONLINE : PaymentMethod.ON_DELIVERY,
@@ -247,12 +314,12 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
   // ── Sous-commandes : une par boutique ─────
   const groups = deliveries.map((delivery) => ({
     delivery,
-    items: lines
-      .filter(({ offer }) => offer!.boutique?.id === delivery.boutiqueId)
-      .map(({ item }) => ({ productBoutiqueId: item.productBoutiqueId, price: item.price, quantity: item.quantity })),
+    items: items.filter((_, index) => lines[index]!.offer!.boutique?.id === delivery.boutiqueId),
   }));
   const subtotals = groups.map((group) => group.items.reduce((sum, item) => sum + item.price * item.quantity, 0));
-  const shares = allocateDiscount(subtotals, order.discountAmount);
+  const shares = couponShopId
+    ? groups.map((group) => (group.delivery.boutiqueId === couponShopId ? discountAmount : 0))
+    : allocateDiscount(subtotals, discountAmount);
   const partStatus = online ? ShopOrderStatus.AWAITING_PAYMENT : ShopOrderStatus.PENDING;
   const schedule = scheduleFor(partStatus, now);
 
@@ -269,6 +336,7 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
       items: group.items,
       subtotal: partSubtotal,
       discountAmount: partDiscount,
+      platformDiscount: couponShopId ? 0 : partDiscount,
       deliveryFee: group.delivery.fee,
       amount: Math.max(0, partSubtotal - partDiscount) + group.delivery.fee,
       delivery: group.delivery,
@@ -297,6 +365,7 @@ export const createOrder = (userId: string, body: CheckoutBody = {}) => {
 
   db.orders.push(order);
   db.shopOrders.push(...parts);
+  recordBoostSales(db, items, now);
   // Le panier est vidé une fois la commande enregistrée.
   cart.items = [];
   cart.amount = 0;

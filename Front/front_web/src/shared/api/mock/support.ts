@@ -21,6 +21,7 @@ import {
 import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
 import { allShops, findLiveOffer } from "./liveCatalog";
+import { stopShopBoosts } from "./marketing";
 import { writeDb, type MockDb } from "./mockDb";
 import { applyAction, freshDb, sessionUser } from "./shopOrders";
 import { PLATFORM_NAME, type MockSanction, type MockSupportMessage, type MockSupportTicket } from "./supportSeed";
@@ -824,7 +825,7 @@ const targetOf = (db: MockDb, kind: SanctionTargetKind, id: string): { label: st
 const applySanctionEffects = (db: MockDb, input: { type: SanctionType; kind: SanctionTargetKind; id: string; reason: string; days?: number | undefined; ticketId?: string | undefined; createdBy: string | null; provisional?: boolean }, now: Date): MockSanction => {
   if (!SANCTION_TARGETS[input.type]?.includes(input.kind)) throw new ApiError(`${SANCTION_LABELS[input.type]} ne vise pas cette cible.`, 400);
   if (!input.reason.trim()) throw new ApiError("Le motif est requis : la personne visée le lira.", 400);
-  if (input.type === "suspension" && !(SUSPENSION_DAYS as readonly number[]).includes(input.days ?? 0)) {
+  if ((input.type === "suspension" || input.type === "promo_ban") && !(SUSPENSION_DAYS as readonly number[]).includes(input.days ?? 0)) {
     throw new ApiError(`Durée de suspension invalide. Valeurs acceptées : ${SUSPENSION_DAYS.join(", ")} jours.`, 400);
   }
   const stamp = now.toISOString();
@@ -841,6 +842,19 @@ const applySanctionEffects = (db: MockDb, input: { type: SanctionType; kind: San
       endsAt = new Date(now.getTime() + (input.days ?? 7) * DAY).toISOString();
       const current = db.moderation.suspendedShops[input.id];
       if (!current || current < endsAt) db.moderation.suspendedShops[input.id] = endsAt;
+      break;
+    }
+    case "promo_ban": {
+      endsAt = new Date(now.getTime() + (input.days ?? 7) * DAY).toISOString();
+      const blocked = (db.moderation.promotionsBlocked ??= {});
+      const current = blocked[input.id];
+      if (!current || current < endsAt) blocked[input.id] = endsAt;
+      // Ses promotions en cours ou à venir s'arrêtent, ses boosts aussi (budget rendu).
+      for (const promo of db.marketing.promotions) {
+        if (promo.boutiqueId !== input.id || !["draft", "scheduled", "active", "paused"].includes(promo.status)) continue;
+        Object.assign(promo, { status: "stopped", stoppedAt: stamp, stopReason: "Promotions suspendues par la modération.", updatedAt: stamp });
+      }
+      stopShopBoosts(db, input.id, "Promotions suspendues par la modération.", now);
       break;
     }
     case "block": {
@@ -921,6 +935,17 @@ const liftEffects = (db: MockDb, sanction: MockSanction, by: string | null, reas
     case "suspension":
       if (db.moderation.suspendedShops[sanction.target.id]) setSuspension(db, sanction.target.id, remainingSuspension(db, sanction.target.id, sanction, now));
       break;
+    case "promo_ban": {
+      // Une autre suspension des promotions encore en cours garde sa date.
+      const blocked = (db.moderation.promotionsBlocked ??= {});
+      const ends = db.sanctions
+        .filter((other) => other !== sanction && !other.liftedAt && other.type === "promo_ban" && other.target.id === sanction.target.id && other.endsAt && new Date(other.endsAt) > now)
+        .map((other) => other.endsAt!)
+        .sort();
+      if (ends.length > 0) blocked[sanction.target.id] = ends.at(-1)!;
+      else delete blocked[sanction.target.id];
+      break;
+    }
     case "block":
       delete db.moderation.blockedUsers[sanction.target.id];
       for (const shopId of sanction.suspendedShopIds) {

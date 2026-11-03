@@ -17,5 +17,8 @@ export const AdminNav = () => (
     <NavLink className={tabClass} to={adminPaths.shopRequests}>
       Demandes de boutique
     </NavLink>
+    <NavLink className={tabClass} to={adminPaths.marketing}>
+      Promotions et boosts
+    </NavLink>
   </nav>
 );

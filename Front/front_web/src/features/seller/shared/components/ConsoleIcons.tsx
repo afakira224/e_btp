@@ -80,3 +80,17 @@ export const MenuIcon = () => (
     <path d="M4 7h16M4 12h16M4 17h16" />
   </Icon>
 );
+
+export const PromotionsIcon = () => (
+  <Icon>
+    <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+    <circle cx="7.5" cy="7.5" r="1.5" />
+  </Icon>
+);
+
+export const BoostIcon = () => (
+  <Icon>
+    <path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z" />
+    <path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" />
+  </Icon>
+);

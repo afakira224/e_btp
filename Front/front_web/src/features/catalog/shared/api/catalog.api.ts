@@ -5,7 +5,7 @@ import type {
   Famille,
   SousCategorie,
 } from "../../../../entities/taxonomy";
-import type { Promotion } from "../../../../entities/promotion";
+import type { Campaign, Promotion } from "../../../../entities/promotion";
 
 // ─────────────────────────────────────────────
 //  Lectures du catalogue, communes aux sub-features.
@@ -139,17 +139,73 @@ export const fetchNewArrivals = async (
   return page.items;
 };
 
-/** Meilleures ventes — les offres mises en avant, les plus commentées d'abord. */
+/** Meilleures ventes : unités vendues et livrées sur 30 jours (calculées par le serveur). */
 export const fetchBestSellers = async (
   signal?: AbortSignal
 ): Promise<ProductBoutique[]> => {
+  const page = await getPage("/product-boutiques?sort=best_sellers&page=1&limit=10", signal);
+  return page.items;
+};
+
+/** Produits phares d'une vitrine, dans l'ordre choisi par la boutique. */
+export const fetchFeaturedOffers = async (
+  boutiqueId: string,
+  signal?: AbortSignal
+): Promise<ProductBoutique[]> => {
   const page = await getPage(
-    "/product-boutiques?isFeatured=true&page=1&limit=10",
+    `/product-boutiques?boutiqueId=${encodeURIComponent(boutiqueId)}&featured=true&page=1&limit=6`,
     signal
   );
-  return [...page.items].sort(
-    (a, b) => (b.reviewsCount ?? 0) - (a.reviewsCount ?? 0)
+  return page.items;
+};
+
+/** Emplacements des places sponsorisées, et ce que chacune lit de la page. */
+export type SponsoredSlot = "home" | "search" | "category" | "similar" | "promotions";
+
+/**
+ * Offres boostées d'une page, choisies par le serveur pour ce visiteur
+ * (pertinence, fréquence, budget). Une erreur n'empêche jamais la page :
+ * la place reste simplement vide.
+ */
+export const fetchSponsored = async (
+  slot: SponsoredSlot,
+  context: Record<string, string | undefined> = {},
+  signal?: AbortSignal
+): Promise<ProductBoutique[]> => {
+  const params = new URLSearchParams({ slot });
+  for (const [key, value] of Object.entries(context)) if (value) params.set(key, value);
+  try {
+    const response = await apiClient.get<ProductBoutique[]>(`/sponsored?${params.toString()}`, signal);
+    return response.data ?? [];
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw error;
+    return [];
+  }
+};
+
+/** Lien vers une fiche : depuis une place sponsorisée, la visite est attribuée au boost. */
+export const offerPath = (offer: Pick<ProductBoutique, "id" | "sponsored">): string =>
+  offer.sponsored
+    ? `/produits/${offer.id}?src=${encodeURIComponent(`boost:${offer.sponsored.boostId}`)}`
+    : `/produits/${offer.id}`;
+
+/** Campagnes de la plateforme en cours ou à venir. */
+export const fetchCampaigns = async (signal?: AbortSignal): Promise<Campaign[]> => {
+  const response = await apiClient.get<Campaign[]>("/campaigns", signal);
+  return response.data ?? [];
+};
+
+/** Une campagne et ses offres inscrites, la plus remisée d'abord. */
+export const fetchCampaign = async (
+  slug: string,
+  signal?: AbortSignal
+): Promise<Campaign & { offers: ProductBoutique[] }> => {
+  const response = await apiClient.get<Campaign & { offers: ProductBoutique[] }>(
+    `/campaigns/${encodeURIComponent(slug)}`,
+    signal
   );
+  if (!response.data) throw new Error("Campagne introuvable.");
+  return response.data;
 };
 
 /**
@@ -176,10 +232,12 @@ export const fetchRecommended = async (
  */
 export const fetchOffer = async (
   id: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** Provenance (`boost:<id>`) : une visite depuis une place sponsorisée est comptée. */
+  src?: string
 ): Promise<ProductBoutique> => {
   const response = await apiClient.get<ProductBoutique>(
-    `/product-boutiques/${encodeURIComponent(id)}`,
+    `/product-boutiques/${encodeURIComponent(id)}${src ? `?src=${encodeURIComponent(src)}` : ""}`,
     signal
   );
   if (!response.data) throw new Error("Produit introuvable.");
@@ -263,7 +321,7 @@ export const fetchActivePromotions = async (
 //  Toutes passent par /product-boutiques/search : seuls le tri et les
 //  filtres changent.
 // ─────────────────────────────────────────────
-export type ListingSort = "newest" | "popular" | "rating" | "price_asc" | "price_desc";
+export type ListingSort = "newest" | "popular" | "rating" | "price_asc" | "price_desc" | "best_sellers" | "discount";
 
 export interface ListingQuery {
   sort: ListingSort;
@@ -274,6 +332,8 @@ export interface ListingQuery {
   boutiqueId?: string | undefined;
   /** Texte libre, sur le nom et la description du produit. */
   q?: string | undefined;
+  /** Offres inscrites à une campagne de la plateforme. */
+  campaignId?: string | undefined;
 }
 
 export const fetchListing = async (
@@ -287,5 +347,6 @@ export const fetchListing = async (
   if (query.discounted) params.set("discounted", "true");
   if (query.boutiqueId) params.set("boutiqueId", query.boutiqueId);
   if (query.q) params.set("q", query.q);
+  if (query.campaignId) params.set("campaignId", query.campaignId);
   return toProductPage(await getPage(`/product-boutiques/search?${params.toString()}`, signal));
 };

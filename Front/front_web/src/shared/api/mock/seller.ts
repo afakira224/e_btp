@@ -7,6 +7,7 @@ import type { ApiResponse } from "../httpClient";
 import { PRODUCTS } from "./catalogSeed";
 import { buildProductDelivery, normalizeSettings, toSettingsDto, validateSettings } from "./deliveryRules";
 import { findLiveOffer, findShop, liveCatalog, rawShop, shopDeliveryOf } from "./liveCatalog";
+import { recordPrice } from "./marketingPricing";
 import { objectId, readDb, writeDb, type MockProductDelivery, type MockShopPatch } from "./mockDb";
 
 // ─────────────────────────────────────────────
@@ -340,12 +341,14 @@ export const createOffer = (body: unknown): ApiResponse<ProductBoutique> => {
     productId,
     urlImages: files.map((file) => URL.createObjectURL(file)),
     price: values.price ?? 0,
-    discountPrice: values.discountPrice ?? null,
+    discountPrice: null,
     stock: values.stock ?? 0,
     delivery,
     createdAt: now,
     updatedAt: now,
   });
+  // Premier prix de l'historique : il sert de prix de référence aux promotions.
+  recordPrice(db.marketing, id, null, values.price ?? 0, new Date(now));
   writeDb(db);
 
   return ok(findLiveOffer(id)!, "Produit ajouté à la boutique avec succès", 201);
@@ -381,9 +384,11 @@ export const updateOffer = (id: string, body: unknown): ApiResponse<ProductBouti
   const now = new Date().toISOString();
   const db = readDb();
   const created = db.offers.find((candidate) => candidate.id === id);
+  // Le prix remisé vient des promotions : la boutique ne l'écrit plus. Un
+  // nouveau prix entre dans l'historique, pour le prix barré.
+  if (values.price !== undefined && values.price !== offer.price) recordPrice(db.marketing, id, offer.price, values.price, new Date(now));
   const changes = {
     ...(values.price !== undefined ? { price: values.price } : {}),
-    ...(values.discountPrice !== undefined ? { discountPrice: values.discountPrice } : {}),
     ...(values.stock !== undefined ? { stock: values.stock } : {}),
     ...(delivery ? { delivery } : {}),
     urlImages,

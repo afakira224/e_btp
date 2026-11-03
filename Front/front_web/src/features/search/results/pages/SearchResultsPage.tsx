@@ -7,6 +7,7 @@ import {
   CatalogPage,
   InfiniteProductGrid,
   useResource,
+  useSponsored,
 } from "../../../catalog";
 import { loadTaxonomy, searchUrl, useRecentSearches } from "../../shared";
 import { SearchFilters } from "../components/SearchFilters";
@@ -30,6 +31,8 @@ export const SearchResultsPage = () => {
   const filtersId = useId();
   const { criteria, update, reset, filterCount } = useSearchQuery();
   const results = useSearchResults(criteria);
+  // Deux places sponsorisées en tête, pertinentes pour la recherche.
+  const sponsorises = useSponsored("search", { q: criteria.q });
   const familles = useResource(loadFamilles, []);
   const { recent } = useRecentSearches();
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -158,6 +161,7 @@ export const SearchResultsPage = () => {
 
           <InfiniteProductGrid
             {...results}
+            sponsored={sponsorises.data}
             pageSize={PAGE_SIZE}
             columns={3}
             empty={empty}

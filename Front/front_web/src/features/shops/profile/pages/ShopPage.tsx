@@ -8,8 +8,10 @@ import {
   CatalogSkeletons,
   EmptyState,
   FamilleChips,
+  fetchFeaturedOffers,
   fetchListing,
   InfiniteProductGrid,
+  ProductCard,
   useFamilleParam,
   useListing,
   useResource,
@@ -76,6 +78,10 @@ export const ShopPage = () => {
   );
   const counts = useResource<Counts | null>(loadCounts, null, boutiqueId);
 
+  // Produits phares : jusqu'à 6, dans l'ordre choisi par la boutique.
+  const loadPhares = useCallback((signal: AbortSignal) => fetchFeaturedOffers(boutiqueId, signal), [boutiqueId]);
+  const phares = useResource(loadPhares, [], boutiqueId);
+
   const produits = useListing(
     { sort, boutiqueId, familleId, discounted: promoOnly, q: search.query || undefined },
     PAGE_SIZE
@@ -124,6 +130,21 @@ export const ShopPage = () => {
           promotions={counts.data?.promotions}
         />
       )}
+
+      {phares.data.length > 0 && !filtered ? (
+        <section aria-labelledby={`${sortId}-phares`} className={styles.featured}>
+          <div className={styles.head}>
+            <h2 id={`${sortId}-phares`} className={styles.title}>
+              Produits phares
+            </h2>
+          </div>
+          <div className={styles.featuredGrid}>
+            {phares.data.map((item) => (
+              <ProductCard key={item.id} item={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section aria-labelledby={`${sortId}-title`}>
         <div className={styles.head}>

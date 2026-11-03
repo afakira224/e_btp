@@ -129,3 +129,13 @@
     margin-left: auto;
   }
 }
+
+.featured {
+  margin-bottom: var(--space-6);
+}
+
+.featuredGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}

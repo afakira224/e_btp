@@ -45,6 +45,13 @@
   justify-items: start;
 }
 
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
 .edit {
   font-size: var(--text-sm);
   color: var(--color-text);

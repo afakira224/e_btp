@@ -119,6 +119,8 @@ interface InfiniteProductGridProps {
   columns?: Columns;
   /** Rendu d'une vignette ; par défaut la carte produit standard. */
   renderItem?: ((item: ProductBoutique, index: number) => ReactNode) | undefined;
+  /** Places sponsorisées, en tête de la grille (jamais seules : sans résultat, la page reste vide). */
+  sponsored?: readonly ProductBoutique[] | undefined;
 }
 
 // ─────────────────────────────────────────────
@@ -138,6 +140,7 @@ export const InfiniteProductGrid = ({
   pageSize = 12,
   columns = 4,
   renderItem,
+  sponsored = [],
 }: InfiniteProductGridProps) => {
   // L'observateur se tait pendant un chargement ou après une erreur : sans
   // cela, une panne réseau déclencherait une rafale de requêtes.
@@ -164,9 +167,14 @@ export const InfiniteProductGrid = ({
   if (premierChargement) return <CatalogSkeletons count={pageSize} columns={columns} />;
   if (items.length === 0) return <EmptyState {...empty} />;
 
+  const promoted = sponsored.filter((offer) => !items.slice(0, 4).some((item) => item.id === offer.id));
+
   return (
     <>
       <div className={withColumns(styles.grid, columns)}>
+        {promoted.map((item) => (
+          <ProductCard key={`sponsorise-${item.id}`} item={item} />
+        ))}
         {items.map((item, index) =>
           renderItem ? (
             <Fragment key={item.id}>{renderItem(item, index)}</Fragment>

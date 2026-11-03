@@ -409,3 +409,79 @@
     padding: var(--space-4);
   }
 }
+
+.reference {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.tiers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tiersTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.tiersTable th,
+.tiersTable td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.tiersTable th {
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.tierOn td {
+  font-weight: 600;
+  background: var(--color-surface-alt);
+}
+
+.flash {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.flashTag {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.flashLabel {
+  font-size: var(--text-sm);
+}
+
+.flashTime {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

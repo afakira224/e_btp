@@ -16,8 +16,14 @@ export interface CartItem {
   price: number;
   /** Absent ou null quand l'offre n'est pas remisée (le back envoie null). */
   discountPrice?: number | null | undefined;
-  /** Prix unitaire figé au moment de l'ajout. */
+  /** Prix unitaire en vigueur pour cette quantité : promotion et palier compris (le checkout le recalcule). */
   unitPrice: number;
+  /** Prix unitaire vu à l'ajout ; différent quand une promotion a commencé ou fini depuis. */
+  addedUnitPrice?: number | undefined;
+  priceChanged?: boolean | undefined;
+  /** Économie de la ligne par rapport au prix de base. */
+  savings?: number | undefined;
+  pricing?: import("../../product").OfferPricing | undefined;
   quantity: number;
   stock: number;
   /** `unitPrice * quantity`. */
@@ -30,8 +36,10 @@ export interface Cart {
   items: CartItem[];
   /** Somme des quantités. */
   totalItems: number;
-  /** Somme des `lineTotal`. */
+  /** Somme des `lineTotal`, aux prix en vigueur. */
   totalAmount: number;
+  /** Économies du panier par rapport aux prix de base. */
+  totalSavings?: number | undefined;
   createdAt: string;
   updatedAt: string;
 }
@@ -50,22 +58,17 @@ export const EMPTY_CART: Cart = {
 //  Lectures utiles à l'affichage
 // ─────────────────────────────────────────────
 
-/** Prix courant effectif de l'offre, remise comprise. */
-export const currentPrice = (item: CartItem): number =>
-  item.discountPrice != null && item.discountPrice < item.price
-    ? item.discountPrice
-    : item.price;
+/** Prix unitaire payé aujourd'hui, promotion et palier compris. */
+export const currentPrice = (item: CartItem): number => item.unitPrice;
 
 /**
- * Le prix a-t-il bougé depuis l'ajout ?
- * Le DTO expose à la fois le prix figé et le prix courant : autant le dire
- * à l'utilisateur plutôt que de le laisser découvrir l'écart au paiement.
+ * Le prix a-t-il bougé depuis l'ajout ? Une promotion a commencé ou fini :
+ * autant le dire plutôt que de le laisser découvrir au paiement.
  */
 export const priceChanged = (item: CartItem): boolean =>
-  currentPrice(item) !== item.unitPrice;
+  item.priceChanged ?? (item.addedUnitPrice !== undefined && item.addedUnitPrice !== item.unitPrice);
 
-export const priceDelta = (item: CartItem): number =>
-  currentPrice(item) - item.unitPrice;
+export const priceDelta = (item: CartItem): number => item.unitPrice - (item.addedUnitPrice ?? item.unitPrice);
 
 /** La quantité au panier dépasse-t-elle le stock encore disponible ? */
 export const exceedsStock = (item: CartItem): boolean => item.quantity > item.stock;

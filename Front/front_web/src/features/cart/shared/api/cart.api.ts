@@ -107,6 +107,8 @@ export interface CheckoutInput {
   /** Téléphone de contact, utile quand tout est retiré en boutique. */
   telephone?: string | undefined;
   paymentMethod: PaymentMethod;
+  /** Code de réduction, de la plateforme ou d'une boutique. */
+  code?: string | undefined;
 }
 
 /** Commande payée en ligne : le serveur renvoie aussi la page du prestataire. */
@@ -118,7 +120,24 @@ export const placeOrder = async (userId: string, input: CheckoutInput): Promise<
     ...(input.addressId ? { addressId: input.addressId } : {}),
     ...(input.telephone ? { telephone: input.telephone } : {}),
     paymentMethod: input.paymentMethod,
+    ...(input.code ? { code: input.code } : {}),
   });
   if (!response.data) throw new Error("La commande n'a pas été créée.");
+  return response.data;
+};
+
+/** Aperçu d'un code sur le panier, aux prix du moment ; le checkout le recalcule. */
+export interface CouponPreview {
+  promotion: { id: string; nom: string; code?: string | null | undefined };
+  totalBefore: number;
+  discountAmount: number;
+  totalAfter: number;
+  /** Code d'une boutique : il ne vaut que sur ses articles. */
+  boutique?: { id: string; nom: string } | undefined;
+}
+
+export const previewCoupon = async (userId: string, code: string): Promise<CouponPreview> => {
+  const response = await apiClient.post<CouponPreview>("/promotions/apply", { userId, code });
+  if (!response.data) throw new Error("Code introuvable.");
   return response.data;
 };

@@ -1,3 +1,4 @@
+import { seedMarketing, type MockMarketing } from "./marketingSeed";
 import { EntityType, type User } from "../../../entities/user";
 import type { DeliveryMode } from "../../../entities/delivery";
 import type { Shop } from "../../../entities/shop";
@@ -160,6 +161,8 @@ export interface MockDb {
   /** Dernier numéro de demande attribué (SUP-000123). */
   supportSeq: number;
   moderation: MockModeration;
+  /** Promotions, campagnes, boosts et crédits (marketingSeed.ts). */
+  marketing: MockMarketing;
   /** Réglages de livraison enregistrés par les boutiques, par identifiant. */
   shopDeliveries: Record<string, MockShopDelivery>;
   /** Modifications des offres du catalogue de départ, par identifiant. */
@@ -388,6 +391,7 @@ const seed = (): MockDb => {
     orders: demo.orders,
     shopOrders: demo.shopOrders,
     ...supportOf(users[0], demo.shopOrders),
+    marketing: seedMarketing(),
     shopDeliveries: {},
     offerPatches: {},
     offers: [],
@@ -463,6 +467,8 @@ export const readDb = (): MockDb => {
             sanctions: parsed.sanctions ?? [],
             supportSeq: parsed.supportSeq ?? 0,
             moderation: { ...EMPTY_MODERATION, ...parsed.moderation },
+            // Base écrite avant les promotions de boutique : le jeu de départ la rejoint.
+            marketing: parsed.marketing ? { ...seedMarketing(), ...parsed.marketing } : seedMarketing(),
             shopDeliveries: parsed.shopDeliveries ?? {},
             offerPatches: parsed.offerPatches ?? {},
             offers: parsed.offers ?? [],

@@ -145,6 +145,11 @@
   text-decoration: line-through;
 }
 
+.until {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .footer {
   display: flex;
   align-items: center;

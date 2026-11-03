@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import {
   AuthGuard,
   ForgotPasswordPage,
@@ -10,6 +10,7 @@ import {
 } from "../../features/auth";
 import {
   BestSellersPage,
+  CampaignPage,
   CategoriePage,
   FamillePage,
   FamillesPage,
@@ -25,6 +26,7 @@ import { WishlistPage } from "../../features/wishlist";
 import { ShopRequestFormPage, ShopRequestStatusPage } from "../../features/shop-request";
 import {
   AdminGuard,
+  AdminMarketingPage,
   AdminOrdersPage,
   AdminShopOrderPage,
   AdminSupportPage,
@@ -47,24 +49,41 @@ import {
 } from "../../features/account";
 import { ContactPage } from "../../features/support";
 import {
+  BoostDetailPage,
+  BoostFormPage,
+  CreditPaymentPage,
   OfferFormPage,
   OffersPage,
+  parseCreditPaymentId,
+  PromotionFormPage,
   SellerConsoleLayout,
   SellerDashboardPage,
   SellerGuard,
   SellerHomePage,
   SellerLoginPage,
   SellerShopLayout,
+  ShopBoostsPage,
   ShopDeliveryPage,
   ShopInfoPage,
   ShopNewTicketPage,
   ShopOrderPage,
   ShopOrdersPage,
+  ShopPromotionsPage,
   ShopSupportPage,
   ShopSupportTicketPage,
 } from "../../features/seller";
 import { SiteLayout } from "../../shared/layout";
 import { ROUTES } from "./routes";
+
+/**
+ * La page du prestataire simulé sert deux paiements : une commande, ou une
+ * recharge de crédits de boost (`credits-<boutique>-<recharge>`).
+ */
+const PaymentRoute = () => {
+  const { orderId = "" } = useParams<{ orderId: string }>();
+  const credits = parseCreditPaymentId(orderId);
+  return credits ? <CreditPaymentPage shopId={credits.shopId} purchaseId={credits.purchaseId} /> : <PaymentPage />;
+};
 
 export const AppRouter = () => (
   <BrowserRouter>
@@ -103,6 +122,12 @@ export const AppRouter = () => (
               <Route path={ROUTES.sellerProducts} element={<OffersPage />} />
               <Route path={ROUTES.sellerProductNew} element={<OfferFormPage />} />
               <Route path={ROUTES.sellerProductEdit} element={<OfferFormPage />} />
+              <Route path={ROUTES.sellerPromotions} element={<ShopPromotionsPage />} />
+              <Route path={ROUTES.sellerPromotionNew} element={<PromotionFormPage />} />
+              <Route path={ROUTES.sellerPromotionEdit} element={<PromotionFormPage />} />
+              <Route path={ROUTES.sellerBoosts} element={<ShopBoostsPage />} />
+              <Route path={ROUTES.sellerBoostNew} element={<BoostFormPage />} />
+              <Route path={ROUTES.sellerBoost} element={<BoostDetailPage />} />
               <Route path={ROUTES.sellerDelivery} element={<ShopDeliveryPage />} />
               <Route path={ROUTES.sellerInfo} element={<ShopInfoPage />} />
             </Route>
@@ -123,6 +148,7 @@ export const AppRouter = () => (
         <Route path={ROUTES.nouveautes} element={<NewArrivalsPage />} />
         <Route path={ROUTES.meilleuresVentes} element={<BestSellersPage />} />
         <Route path={ROUTES.promotions} element={<PromotionsPage />} />
+        <Route path={ROUTES.campagne} element={<CampaignPage />} />
         <Route path={ROUTES.boutiques} element={<ShopsPage />} />
         <Route path={ROUTES.boutique} element={<ShopPage />} />
         <Route path={ROUTES.contact} element={<ContactPage />} />
@@ -135,7 +161,7 @@ export const AppRouter = () => (
         <Route element={<AuthGuard />}>
           <Route path={ROUTES.panier} element={<CartPage />} />
           <Route path={ROUTES.commande} element={<CheckoutPage />} />
-          <Route path={ROUTES.paiement} element={<PaymentPage />} />
+          <Route path={ROUTES.paiement} element={<PaymentRoute />} />
           <Route path={ROUTES.favoris} element={<WishlistPage />} />
 
           {/* Espace compte : « Mon compte » présente les rubriques, chacune
@@ -165,6 +191,7 @@ export const AppRouter = () => (
             <Route path={ROUTES.adminOrder} element={<AdminShopOrderPage />} />
             <Route path={ROUTES.adminSupport} element={<AdminSupportPage />} />
             <Route path={ROUTES.adminSupportTicket} element={<AdminSupportTicketPage />} />
+            <Route path={ROUTES.adminMarketing} element={<AdminMarketingPage />} />
           </Route>
         </Route>
       </Route>

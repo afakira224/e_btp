@@ -20,7 +20,7 @@ import {
 } from "../../catalog";
 import { AddressChoice } from "../components/AddressChoice";
 import { DeliveryChoices } from "../components/DeliveryChoices";
-import { fetchCheckoutAddresses, placeOrder } from "../shared/api/cart.api";
+import { fetchCheckoutAddresses, placeOrder, previewCoupon, type CouponPreview } from "../shared/api/cart.api";
 import { useCart } from "../shared/hooks/useCart";
 import { useDeliveryQuote } from "../shared/hooks/useDeliveryQuote";
 import styles from "./CheckoutPage.module.css";
@@ -66,6 +66,25 @@ export const CheckoutPage = () => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.ON_DELIVERY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [codeInput, setCodeInput] = useState("");
+  const [coupon, setCoupon] = useState<CouponPreview | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [checkingCode, setCheckingCode] = useState(false);
+
+  const applyCode = async () => {
+    const code = codeInput.trim().toUpperCase();
+    if (!code || !userId) return;
+    setCheckingCode(true);
+    setCouponError(null);
+    try {
+      setCoupon(await previewCoupon(userId, code));
+    } catch (caught) {
+      setCoupon(null);
+      setCouponError(caught instanceof ApiError ? caught.message : "Ce code n'a pas pu être vérifié.");
+    } finally {
+      setCheckingCode(false);
+    }
+  };
 
   if (cartLoading && cart.items.length === 0) {
     return (
@@ -129,6 +148,7 @@ export const CheckoutPage = () => {
         addressId: homeDelivery ? (selectedId ?? undefined) : undefined,
         telephone: pickupOnly && telephone.trim() ? telephone.trim() : undefined,
         paymentMethod,
+        code: coupon?.promotion.code ?? undefined,
       });
       // La page part avant que le panier, vidé par le serveur, ne soit relu :
       // sinon elle afficherait un instant « panier vide ».
@@ -304,6 +324,37 @@ export const CheckoutPage = () => {
             <span>Sous-total</span>
             <span>{formatPrice(cart.totalAmount)}</span>
           </div>
+          {cart.totalSavings ? (
+            <div className={styles.row}>
+              <span>Dont promotions</span>
+              <span>{`−${formatPrice(cart.totalSavings)}`}</span>
+            </div>
+          ) : null}
+
+          <div className={styles.coupon}>
+            <Input
+              label="Code de réduction"
+              value={codeInput}
+              onChange={(event) => {
+                setCodeInput(event.target.value);
+                if (coupon) setCoupon(null);
+              }}
+              placeholder="Ex. BIENVENUE10"
+              {...(couponError ? { error: couponError } : {})}
+            />
+            <Button variant="ghost" onClick={() => void applyCode()} isLoading={checkingCode} disabled={!codeInput.trim()}>
+              Appliquer
+            </Button>
+          </div>
+          {coupon ? (
+            <div className={styles.row}>
+              <span>
+                {`Code ${coupon.promotion.code ?? ""}`}
+                {coupon.boutique ? ` · articles de ${coupon.boutique.nom}` : ""}
+              </span>
+              <span>{`−${formatPrice(coupon.discountAmount)}`}</span>
+            </div>
+          ) : null}
           {quoteCurrent
             ? quote.groups.map((group) => (
                 <div key={group.boutiqueId} className={styles.row}>
@@ -316,7 +367,7 @@ export const CheckoutPage = () => {
           <div className={styles.total}>
             <span className={styles.totalLabel}>Total</span>
             <span className={styles.totalValue}>
-              {formatPrice(quoteCurrent && quote.ready ? quote.total : cart.totalAmount)}
+              {formatPrice(Math.max(0, (quoteCurrent && quote.ready ? quote.total : cart.totalAmount) - (coupon?.discountAmount ?? 0)))}
             </span>
           </div>
 

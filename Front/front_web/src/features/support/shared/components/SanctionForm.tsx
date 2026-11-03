@@ -52,7 +52,7 @@ export const SanctionForm = ({ targets, ticketId, suggestion, onApplied }: Sanct
         targetId: target.id,
         reason: reason.trim(),
         ticketId,
-        days: type === "suspension" ? Number(days) : undefined,
+        days: type === "suspension" || type === "promo_ban" ? Number(days) : undefined,
       });
       setReason("");
       onApplied(sanction);
@@ -90,7 +90,7 @@ export const SanctionForm = ({ targets, ticketId, suggestion, onApplied }: Sanct
         disabled={busy}
         hint={suggestion ? `Barème : ${SANCTION_LABELS[suggestion.type].toLowerCase()}${suggestion.days ? ` de ${suggestion.days} jours` : ""}.` : undefined}
       />
-      {type === "suspension" ? (
+      {type === "suspension" || type === "promo_ban" ? (
         <Choices
           legend="Durée"
           inline

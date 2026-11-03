@@ -11,6 +11,7 @@ export { ProductPage } from "./product";
 export { NewArrivalsPage, NewArrivalsSection } from "./new-arrivals";
 export { BestSellersPage, BestSellersSection } from "./best-sellers";
 export { PromotionsPage } from "./promotions";
+export { CampaignPage } from "./campaigns";
 export { RecommendedSection } from "./recommended";
 export { ProductCard, RatingStars } from "./shared";
 
@@ -31,6 +32,10 @@ export {
   useInfiniteProducts,
   useListing,
   useResource,
+  useSponsored,
+  withSponsored,
+  offerPath,
+  fetchFeaturedOffers,
   type ListingQuery,
   type ListingSort,
   type PageLoader,

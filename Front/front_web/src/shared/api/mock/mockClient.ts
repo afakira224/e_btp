@@ -5,13 +5,11 @@ import {
   sousCategorieOf,
   type ProductBoutique,
 } from "../../../entities/product";
-import { isRunning, PromotionType } from "../../../entities/promotion";
 import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
 import {
   CATEGORIES_TREE,
   FAMILLES_TREE,
-  PROMOTIONS,
   SOUS_CATEGORIES,
 } from "./catalogSeed";
 import {
@@ -32,6 +30,8 @@ import * as shopOrders from "./shopOrders";
 import * as support from "./support";
 import * as seller from "./seller";
 import * as shopRequests from "./shopRequests";
+import * as marketing from "./marketing";
+import { salesCounts } from "./marketingPricing";
 import { allShops, findLiveOffer, liveCatalog, publicCatalog, rawShop, viewerManages } from "./liveCatalog";
 import {
   objectId,
@@ -345,6 +345,8 @@ const listProductBoutiques = (
   const boutiqueId = params.get("boutiqueId");
   const productId = params.get("productId");
   const isFeatured = params.get("isFeatured");
+  const featured = params.get("featured") === "true";
+  const sort = params.get("sort");
 
   if (boutiqueId && !allShops().some((shop) => shop.id === boutiqueId)) {
     throw new ApiError("Boutique introuvable", 404);
@@ -356,8 +358,16 @@ const listProductBoutiques = (
     if (boutiqueId && item.boutique?.id !== boutiqueId) return false;
     if (productId && item.productId !== productId) return false;
     if (isFeatured !== null && item.isFeatured !== (isFeatured === "true")) return false;
+    if (featured && !item.featuredRank) return false;
     return true;
   });
+
+  // Produits phares dans leur ordre ; meilleures ventes : unités livrées sur 30 jours.
+  if (featured) tous.sort((a, b) => (a.featuredRank ?? 9) - (b.featuredRank ?? 9));
+  else if (sort === "best_sellers") {
+    const sales = salesCounts(readDb());
+    tous.sort((a, b) => (sales.get(b.id) ?? 0) - (sales.get(a.id) ?? 0));
+  }
 
   return ok(paginate(tous, params));
 };
@@ -375,6 +385,8 @@ const searchProductBoutiques = (
   const minRating = params.get("minRating");
   const inStock = params.get("inStock") === "true";
   const discounted = params.get("discounted") === "true";
+  const campaignId = params.get("campaignId");
+  const enrolled = campaignId ? marketing.campaignOfferIds(readDb(), campaignId) : null;
 
   // Même découpage que le back : le prix est filtré à part, pour que la
   // facette `priceRange` décrive la sélection *sans* la contrainte de prix.
@@ -391,9 +403,9 @@ const searchProductBoutiques = (
     }
     if (minRating !== null && (item.rating ?? 0) < Number(minRating)) return false;
     if (inStock && item.stock <= 0) return false;
-    if (discounted && !(item.discountPrice != null && item.discountPrice < item.price)) {
-      return false;
-    }
+    // En promotion : une remise affichée de 5 % au moins, et du stock.
+    if (discounted && !((item.pricing?.percent ?? 0) >= 5 && item.stock > 0)) return false;
+    if (enrolled && !enrolled.has(item.id)) return false;
     return true;
   });
 
@@ -410,9 +422,12 @@ const searchProductBoutiques = (
     max: prix.length > 0 ? Math.max(...prix) : 0,
   };
 
-  // Tris acceptés par le back : newest, price_asc, price_desc, rating, popular.
+  // Tris acceptés par le back : newest, price_asc, price_desc, rating, popular, best_sellers, discount.
   const sort = params.get("sort") ?? "newest";
+  const sales = sort === "best_sellers" ? salesCounts(readDb()) : new Map<string, number>();
   const tris: Record<string, (a: ProductBoutique, b: ProductBoutique) => number> = {
+    best_sellers: (a, b) => (sales.get(b.id) ?? 0) - (sales.get(a.id) ?? 0) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    discount: (a, b) => (b.pricing?.percent ?? 0) - (a.pricing?.percent ?? 0),
     newest: (a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     price_asc: (a, b) => a.price - b.price,
@@ -561,19 +576,6 @@ const getShop = (id: string) => {
   return ok(rawShop(shop));
 };
 
-/** Seules les promotions reellement en cours remontent. */
-const listPromotions = () => ok(PROMOTIONS.filter((promotion) => isRunning(promotion)));
-
-/** Comme le back : ventes flash en cours, la plus proche de sa fin d'abord. */
-const listActiveFlashSales = () =>
-  ok(
-    PROMOTIONS.filter(
-      (promotion) => promotion.type === PromotionType.FLASH_SALE && isRunning(promotion)
-    )
-      .map((promotion) => ({ ...promotion, isActive: true }))
-      .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
-  );
-
 const route = (method: string, path: string, body: unknown): ApiResponse<unknown> => {
   // La chaîne de requête est analysée plutôt que comparée : `?page=2&limit=8`
   // ne peut pas s'apparier par égalité, et l'ordre des paramètres ne doit
@@ -606,9 +608,23 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
     case "GET /product-boutiques/search":
       return searchProductBoutiques(params);
     case "GET /promotions":
-      return listPromotions();
+      return marketing.listPlatformPromotions();
     case "GET /promotions/flash/active":
-      return listActiveFlashSales();
+      return marketing.listActiveFlashSales();
+    case "POST /promotions/apply":
+      return marketing.applyCoupon(body as Parameters<typeof marketing.applyCoupon>[0]);
+    case "GET /campaigns":
+      return marketing.listCampaigns(params);
+    case "POST /campaigns":
+      return marketing.createCampaign(body as Parameters<typeof marketing.createCampaign>[0]);
+    case "GET /boosts":
+      return marketing.listAllBoosts(params);
+    case "GET /boosts/settings":
+      return marketing.getBoostSettings();
+    case "PUT /boosts/settings":
+      return marketing.updateBoostSettings(body as Parameters<typeof marketing.updateBoostSettings>[0]);
+    case "GET /sponsored":
+      return marketing.sponsored(params);
     case "GET /shops":
       return listShops(params);
     case "PUT /auth/me":
@@ -662,6 +678,77 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
   const demande = /^GET \/shop-requests\/([^/]+)$/.exec(key);
   if (demande?.[1]) return shopRequests.getRequest(decodeURIComponent(demande[1]));
 
+  // ── Promotions, boosts et crédits d'une boutique ──
+  // Avant `GET /shops/:id`, qui capturerait sinon ces sous-chemins.
+  const promosBoutique = /^(GET|POST) \/shops\/([^/]+)\/promotions$/.exec(key);
+  if (promosBoutique?.[2]) {
+    const id = decodeURIComponent(promosBoutique[2]);
+    return promosBoutique[1] === "GET"
+      ? marketing.listShopPromotions(id, params)
+      : marketing.createShopPromotion(id, body as Parameters<typeof marketing.createShopPromotion>[1]);
+  }
+
+  const promoBoutique = /^(GET|PUT) \/shops\/([^/]+)\/promotions\/([^/]+)$/.exec(key);
+  if (promoBoutique?.[2] && promoBoutique[3]) {
+    const [shopId, promoId] = [decodeURIComponent(promoBoutique[2]), decodeURIComponent(promoBoutique[3])];
+    return promoBoutique[1] === "GET"
+      ? marketing.getShopPromotion(shopId, promoId)
+      : marketing.updateShopPromotion(shopId, promoId, body as Parameters<typeof marketing.updateShopPromotion>[2]);
+  }
+
+  const estimation = /^POST \/shops\/([^/]+)\/boosts\/estimate$/.exec(key);
+  if (estimation?.[1]) return marketing.estimateBoost(decodeURIComponent(estimation[1]), body as Parameters<typeof marketing.estimateBoost>[1]);
+
+  const boostsBoutique = /^(GET|POST) \/shops\/([^/]+)\/boosts$/.exec(key);
+  if (boostsBoutique?.[2]) {
+    const id = decodeURIComponent(boostsBoutique[2]);
+    return boostsBoutique[1] === "GET"
+      ? marketing.listBoosts(id, params)
+      : marketing.createBoost(id, body as Parameters<typeof marketing.createBoost>[1]);
+  }
+
+  const rechargeSimulee = /^POST \/shops\/([^/]+)\/credits\/([^/]+)\/sandbox$/.exec(key);
+  if (rechargeSimulee?.[1] && rechargeSimulee[2]) {
+    return marketing.settleSandboxCredits(
+      decodeURIComponent(rechargeSimulee[1]),
+      decodeURIComponent(rechargeSimulee[2]),
+      body as Parameters<typeof marketing.settleSandboxCredits>[2]
+    );
+  }
+
+  // Couche simulée seulement : la page de paiement y lit le montant d'une recharge.
+  const recharge = /^GET \/shops\/([^/]+)\/credits\/([^/]+)$/.exec(key);
+  if (recharge?.[1] && recharge[2]) return marketing.getPurchase(decodeURIComponent(recharge[1]), decodeURIComponent(recharge[2]));
+
+  const credits = /^(GET|POST) \/shops\/([^/]+)\/credits$/.exec(key);
+  if (credits?.[2]) {
+    const id = decodeURIComponent(credits[2]);
+    return credits[1] === "GET" ? marketing.getCredits(id) : marketing.rechargeCredits(id, body as Parameters<typeof marketing.rechargeCredits>[1]);
+  }
+
+  const promoAction = /^PATCH \/promotions\/([^/]+)\/([^/]+)$/.exec(key);
+  if (promoAction?.[1] && promoAction[2]) {
+    return marketing.promotionAction(decodeURIComponent(promoAction[1]), promoAction[2], body as Parameters<typeof marketing.promotionAction>[2]);
+  }
+
+  const boostAction = /^PATCH \/boosts\/([^/]+)\/([^/]+)$/.exec(key);
+  if (boostAction?.[1] && boostAction[2]) return marketing.boostAction(decodeURIComponent(boostAction[1]), boostAction[2]);
+
+  const boostLu = /^GET \/boosts\/([^/]+)$/.exec(key);
+  if (boostLu?.[1]) return marketing.getBoost(decodeURIComponent(boostLu[1]));
+
+  const inscription = /^POST \/campaigns\/([^/]+)\/entries$/.exec(key);
+  if (inscription?.[1]) return marketing.joinCampaign(decodeURIComponent(inscription[1]), body as Parameters<typeof marketing.joinCampaign>[1]);
+
+  const campagne = /^(GET|PUT) \/campaigns\/([^/]+)$/.exec(key);
+  if (campagne?.[2]) {
+    const id = decodeURIComponent(campagne[2]);
+    return campagne[1] === "GET" ? marketing.getCampaign(id) : marketing.updateCampaign(id, body as Parameters<typeof marketing.updateCampaign>[1]);
+  }
+
+  const phare = /^PATCH \/product-boutiques\/([^/]+)\/featured$/.exec(key);
+  if (phare?.[1]) return marketing.setFeatured(decodeURIComponent(phare[1]), body as { rank?: number | null });
+
   // ── Espace vendeur ────────────────────────
   // Avant `GET /shops/:id`, qui capturerait sinon `/shops/:id/delivery`.
   const livraison = /^(GET|PUT) \/shops\/([^/]+)\/delivery$/.exec(key);
@@ -686,7 +773,12 @@ const route = (method: string, path: string, body: unknown): ApiResponse<unknown
   if (vus?.[1]) return listRecentlyViewed(decodeURIComponent(vus[1]));
 
   const offre = /^GET \/product-boutiques\/([^/]+)$/.exec(key);
-  if (offre?.[1]) return getOffer(decodeURIComponent(offre[1]));
+  if (offre?.[1]) {
+    // Arrivée depuis une place sponsorisée (?src=boost:<id>) : la visite est comptée et payée.
+    const src = params.get("src") ?? "";
+    if (src.startsWith("boost:")) marketing.recordBoostVisit(src.slice("boost:".length), decodeURIComponent(offre[1]));
+    return getOffer(decodeURIComponent(offre[1]));
+  }
 
   // ── Espace compte ─────────────────────────
   const adresseDefaut = /^PATCH \/addresses\/([^/]+)\/default$/.exec(key);

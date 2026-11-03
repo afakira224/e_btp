@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   CatalogHeader,
   CatalogPage,
@@ -8,9 +8,11 @@ import {
 import {
   FamilleChips,
   fetchActivePromotions,
+  fetchCampaigns,
   useFamilleParam,
   useListing,
   useResource,
+  useSponsored,
   type ListingSort,
 } from "../../shared";
 import { FlashSaleBanner } from "../components/FlashSaleBanner";
@@ -22,6 +24,7 @@ const SORT_PARAM = "tri";
 
 const SORTS: readonly { value: ListingSort; label: string }[] = [
   { value: "popular", label: "Popularité" },
+  { value: "discount", label: "Plus forte remise" },
   { value: "price_asc", label: "Prix croissant" },
   { value: "price_desc", label: "Prix décroissant" },
   { value: "newest", label: "Nouveautés" },
@@ -39,7 +42,8 @@ const isSort = (value: string | null): value is ListingSort =>
 //   • toutes les offres dont le prix remisé est inférieur au prix
 //     (GET /product-boutiques/search?discounted=true) — une remise posée
 //     par un dépôt existe aussi hors de toute opération.
-//  Le back ne sait pas trier par taux de remise : on ne le propose pas.
+//  Les quatre premières places peuvent être sponsorisées (boosts de
+//  promotion), toujours avec la mention « Sponsorisé ».
 // ─────────────────────────────────────────────
 export const PromotionsPage = () => {
   const sortId = useId();
@@ -50,6 +54,9 @@ export const PromotionsPage = () => {
 
   const flash = useResource(fetchActivePromotions, []);
   const produits = useListing({ sort, familleId, discounted: true }, PAGE_SIZE);
+  const sponsorises = useSponsored("promotions", { familleId });
+  const campagnes = useResource(fetchCampaigns, []);
+  const enCours = campagnes.data.filter((campaign) => campaign.state === "running");
 
   useDocumentTitle("Promotions");
 
@@ -79,6 +86,20 @@ export const PromotionsPage = () => {
             <FlashSaleBanner key={promotion.id} promotion={promotion} />
           ))}
         </div>
+      ) : null}
+
+      {enCours.length > 0 ? (
+        <ul className={styles.campaigns}>
+          {enCours.map((campaign) => (
+            <li key={campaign.id}>
+              <Link className={styles.campaign} to={`/campagnes/${campaign.slug}`}>
+                <span className={styles.campaignTag}>Campagne</span>
+                <strong>{campaign.nom}</strong>
+                <span>{`Au moins −${campaign.minDiscount} % · ${campaign.offerCount ?? 0} offre${(campaign.offerCount ?? 0) > 1 ? "s" : ""} →`}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       <section aria-labelledby={`${sortId}-title`}>
@@ -119,6 +140,7 @@ export const PromotionsPage = () => {
 
         <InfiniteProductGrid
           {...produits}
+          sponsored={sponsorises.data}
           pageSize={PAGE_SIZE}
           empty={{
             title: "Aucune remise dans ce domaine",

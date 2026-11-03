@@ -42,6 +42,10 @@ export interface Promotion {
   actif: boolean;
   /** Calculé par le back : fenêtre de dates et limite d'usage. */
   isActive?: boolean | undefined;
+  /** Vente flash d'une boutique (absente pour celles de la plateforme). */
+  boutique?: { id: string; nom: string } | undefined;
+  /** Vente flash : unités encore vendues au prix flash. */
+  flashLeft?: number | undefined;
 }
 
 /**

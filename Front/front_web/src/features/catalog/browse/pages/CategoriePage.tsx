@@ -15,6 +15,7 @@ import {
   fetchProductsBy,
   useInfiniteProducts,
   useResource,
+  useSponsored,
 } from "../../shared";
 
 const PAGE_SIZE = 8;
@@ -42,6 +43,8 @@ export const CategoriePage = () => {
     pageSize: PAGE_SIZE,
     key: categorieId,
   });
+  // Deux places sponsorisées en tête, pertinentes pour cette rubrique.
+  const sponsorises = useSponsored("category", { categoryId: categorieId });
   // La famille n'est lue que pour le fil d'Ariane : on ne rompt pas la
   // chaîne de navigation sous prétexte qu'on est entré par un lien direct.
   const familles = useResource(fetchFamilles, []);
@@ -114,6 +117,8 @@ export const CategoriePage = () => {
           ) : null}
 
           <InfiniteProductGrid
+
+            sponsored={sponsorises.data}
             {...produits}
             pageSize={PAGE_SIZE}
             empty={{

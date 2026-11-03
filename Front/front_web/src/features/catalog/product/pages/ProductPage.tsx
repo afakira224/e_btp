@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Badge, Thumbnail } from "../../../../shared/ui";
 import {
   categorieOf,
@@ -26,6 +26,8 @@ import {
   fetchSuggestions,
   RatingStars,
   useResource,
+  useSponsored,
+  withSponsored,
 } from "../../shared";
 import { useAuth } from "../../../auth";
 import { BuyBox } from "../components/BuyBox";
@@ -44,10 +46,13 @@ const reportPath = (type: string, id: string, label: string) =>
 // ─────────────────────────────────────────────
 export const ProductPage = () => {
   const { offreId = "" } = useParams<{ offreId: string }>();
+  // Arrivée depuis une place sponsorisée : la visite est attribuée au boost.
+  const [searchParams] = useSearchParams();
+  const src = searchParams.get("src") ?? undefined;
 
   const loadOffre = useCallback(
-    (signal: AbortSignal) => fetchOffer(offreId, signal),
-    [offreId]
+    (signal: AbortSignal) => fetchOffer(offreId, signal, src),
+    [offreId, src]
   );
   const offre = useResource<ProductBoutique | null>(loadOffre, null, offreId);
   const item = offre.data;
@@ -60,6 +65,8 @@ export const ProductPage = () => {
     [offreId]
   );
   const similaires = useResource<ProductBoutique[]>(loadSimilaires, [], offreId);
+  // Deux places sponsorisées parmi les produits similaires, de la même catégorie.
+  const similairesSponsorises = useSponsored("similar", { offerId: offreId });
 
   // Autres articles du dépôt qui vend celui-ci.
   const boutiqueId = item?.boutique?.id ?? "";
@@ -243,7 +250,7 @@ export const ProductPage = () => {
       <ProductStrip
         title="Produits similaires"
         note="Même sous-catégorie en priorité, puis même catégorie, puis même domaine."
-        items={similaires.data}
+        items={withSponsored(similairesSponsorises.data, similaires.data)}
         isLoading={similaires.isLoading}
         {...(sousCategorie
           ? {

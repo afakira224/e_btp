@@ -8,3 +8,4 @@ export {
   type Countdown,
   type Promotion,
 } from "./model/promotion.types";
+export * from "./model/shopPromotion.types";

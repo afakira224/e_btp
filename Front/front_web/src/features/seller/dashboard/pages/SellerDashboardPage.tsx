@@ -9,6 +9,7 @@ import { useAuth } from "../../../auth";
 import { useResource } from "../../../catalog";
 import { fetchShopOrders, useNow } from "../../../orders";
 import { fetchSupportTickets, formatDue, SupportStatusBadge, timeLeft } from "../../../support";
+import { MarketingSummary } from "../../marketing";
 import { fetchShopOffers, sellerPaths, useSellerShop } from "../../shared";
 import { OrderQueue } from "../components/OrderQueue";
 import styles from "./SellerDashboardPage.module.css";
@@ -195,6 +196,8 @@ export const SellerDashboardPage = () => {
             <div className={styles.skeleton} aria-hidden="true" />
           )}
         </AccountPanel>
+
+        <MarketingSummary shopId={shop.id} />
 
         <AccountPanel title="Raccourcis">
           <div className={styles.shortcuts}>

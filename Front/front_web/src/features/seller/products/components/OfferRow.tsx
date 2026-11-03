@@ -33,7 +33,9 @@ export const OfferRow = ({ shopId, offer }: { shopId: string; offer: ProductBout
         ) : null}
         <span className={styles.meta}>
           {formatPrice(effectivePrice(offer))}
-          {hasDiscount(offer) ? <s className={styles.was}>{formatPrice(offer.price)}</s> : null}
+          {hasDiscount(offer) ? <s className={styles.was}>{formatPrice(offer.pricing?.referencePrice ?? offer.price)}</s> : null}
+          {offer.pricing?.promotion ? ` · ${offer.pricing.promotion.label}` : ""}
+          {offer.featuredRank ? ` · Produit phare n° ${offer.featuredRank}` : ""}
           {" · "}
           {offer.stock > 0 ? `${offer.stock} en stock` : "Rupture"}
         </span>
@@ -48,13 +50,20 @@ export const OfferRow = ({ shopId, offer }: { shopId: string; offer: ProductBout
         </span>
       </div>
 
-      <Link
-        className={styles.edit}
-        to={sellerPaths.editProduct(shopId, offer.id)}
-        aria-label={`Modifier ${name}`}
-      >
-        Modifier
-      </Link>
+      <span className={styles.links}>
+        {!offer.hidden && offer.stock > 0 ? (
+          <Link className={styles.edit} to={sellerPaths.newBoost(shopId, { offerIds: [offer.id] })} aria-label={`Booster ${name}`}>
+            Booster
+          </Link>
+        ) : null}
+        <Link
+          className={styles.edit}
+          to={sellerPaths.editProduct(shopId, offer.id)}
+          aria-label={`Modifier ${name}`}
+        >
+          Modifier
+        </Link>
+      </span>
     </li>
   );
 };

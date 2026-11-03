@@ -119,9 +119,9 @@ export const OfferForm = ({ shop, shopDelivery, offer, onSubmit, onCancel }: Off
           label="Prix de vente (GNF)"
           placeholder="78000"
           hint={
-            offer?.discountPrice != null
-              ? `Prix remisé en cours : ${formatPrice(offer.discountPrice)} (inchangé ici).`
-              : undefined
+            offer?.pricing?.promotion
+              ? `Promotion en cours : ${formatPrice(offer.pricing.price)} (${offer.pricing.promotion.label}). Les remises se gèrent dans Promotions.`
+              : "Pour une remise, créez une promotion : le prix barré s'affichera tout seul."
           }
           {...text("price")}
         />

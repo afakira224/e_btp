@@ -7,4 +7,6 @@ export const adminPaths = {
   order: (id: string) => `/admin/commandes/${encodeURIComponent(id)}`,
   support: "/admin/support",
   supportTicket: (id: string) => `/admin/support/${encodeURIComponent(id)}`,
+  /** Campagnes de la plateforme et réglages des boosts. */
+  marketing: "/admin/promotions",
 } as const;

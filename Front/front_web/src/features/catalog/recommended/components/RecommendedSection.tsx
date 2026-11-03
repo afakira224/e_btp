@@ -5,6 +5,8 @@ import {
   ProductCard,
   useInfiniteProducts,
   useSentinel,
+  useSponsored,
+  withSponsored,
 } from "../../shared";
 import styles from "./RecommendedSection.module.css";
 
@@ -13,6 +15,8 @@ const PAGE_SIZE = 8;
 export const RecommendedSection = () => {
   const { items, isLoading, error, hasMore, total, loadMore, retry } =
     useInfiniteProducts(fetchRecommended, { pageSize: PAGE_SIZE });
+  // Quatre places sponsorisées en tête de la sélection, toujours signalées.
+  const sponsorises = useSponsored("home");
 
   // L'observateur se tait pendant un chargement ou après une erreur :
   // sans cela, une panne réseau déclencherait une rafale de requêtes.
@@ -31,8 +35,8 @@ export const RecommendedSection = () => {
       skeleton={{ count: PAGE_SIZE, height: 330, columns: "repeat(6, 1fr)" }}
     >
       <div className={styles.grid}>
-        {items.map((item) => (
-          <ProductCard key={item.id} item={item} />
+        {(items.length > 0 ? withSponsored(sponsorises.data, items) : items).map((item) => (
+          <ProductCard key={`${item.sponsored ? "sponsorise-" : ""}${item.id}`} item={item} />
         ))}
 
         {/* Les blocs d'attente prolongent la grille pendant le chargement

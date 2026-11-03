@@ -12,12 +12,14 @@ import { useShopSupportCounts } from "../hooks/useShopSupportCounts";
 import type { SellerShopContext } from "../hooks/useSellerShop";
 import { sellerPaths } from "../utils/paths";
 import {
+  BoostIcon,
   DashboardIcon,
   DeliveryIcon,
   ExternalIcon,
   MenuIcon,
   OrdersIcon,
   ProductsIcon,
+  PromotionsIcon,
   ShopIcon,
   SupportIcon,
 } from "./ConsoleIcons";
@@ -58,6 +60,20 @@ const SECTIONS: readonly {
     lede: "Vos offres, leurs prix, leur stock et leur livraison.",
     icon: <ProductsIcon />,
     path: sellerPaths.products,
+  },
+  {
+    key: "promotions",
+    label: "Promotions",
+    lede: "Remises, codes, ventes flash et prix par quantité : vous les planifiez et les lancez vous-même.",
+    icon: <PromotionsIcon />,
+    path: (shopId) => sellerPaths.promotions(shopId),
+  },
+  {
+    key: "mise-en-avant",
+    label: "Mise en avant",
+    lede: "Boostez une promotion ou des produits pour qu'ils soient vus par plus de clients.",
+    icon: <BoostIcon />,
+    path: (shopId) => sellerPaths.boosts(shopId),
   },
   {
     key: "livraison",

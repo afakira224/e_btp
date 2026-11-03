@@ -35,6 +35,30 @@ export interface Product {
   updatedAt: string;
 }
 
+/**
+ * Prix d'une offre, calculé par le serveur (OfferPricingDto) : le prix
+ * promotionnel en vigueur, le prix barré (le plus bas des 30 derniers jours,
+ * présent seulement à partir de 5 % de remise), la fin de la promotion et
+ * le prix par quantité.
+ */
+export interface OfferPricing {
+  basePrice: number;
+  price: number;
+  referencePrice?: number | undefined;
+  percent?: number | undefined;
+  endsAt?: string | undefined;
+  promotion?: { id: string; type: string; label: string; flash: boolean; campaignId?: string | undefined } | undefined;
+  tiers: { minQuantity: number; percent: number; unitPrice: number }[];
+}
+
+/** Place sponsorisée : un boost de la boutique la paie. */
+export interface Sponsored {
+  boostId: string;
+  kind: "promotion" | "product";
+  /** « Pourquoi je vois ceci ? » */
+  why: string;
+}
+
 export interface ProductBoutique {
   id: string;
 
@@ -49,8 +73,14 @@ export interface ProductBoutique {
   /** Absent — et non `null` — quand il n'y a pas de remise. */
   /** Absent ou null quand l'offre n'est pas remisée (le back envoie null). */
   discountPrice?: number | null | undefined;
+  /** Calculé par le serveur ; absent seulement d'un DTO antérieur aux promotions. */
+  pricing?: OfferPricing | undefined;
   stock: number;
   isFeatured: boolean;
+  /** Produit phare de la vitrine (1 à 6). */
+  featuredRank?: number | undefined;
+  /** Présent sur une place sponsorisée. */
+  sponsored?: Sponsored | undefined;
   tags: string[];
   rating?: number | undefined;
   reviewsCount?: number | undefined;
@@ -101,19 +131,46 @@ export const sousCategorieOf = (offer: ProductBoutique): SousCategorie | undefin
 //  Règles de prix
 // ─────────────────────────────────────────────
 
-/** Prix réellement payé : la remise l'emporte quand elle existe. */
+/** Prix réellement payé pour une unité : celui que le serveur a calculé. */
 export const effectivePrice = (offer: ProductBoutique): number =>
-  offer.discountPrice != null && offer.discountPrice < offer.price
-    ? offer.discountPrice
-    : offer.price;
+  offer.pricing?.price ??
+  (offer.discountPrice != null && offer.discountPrice < offer.price ? offer.discountPrice : offer.price);
 
-export const hasDiscount = (offer: ProductBoutique): boolean =>
+/**
+ * Prix barré : le prix de référence (le plus bas des 30 derniers jours),
+ * seulement quand la remise affichée atteint 5 %. Un prix monté puis
+ * « barré » n'en montre donc aucun.
+ */
+export const referencePrice = (offer: ProductBoutique): number | null =>
+  offer.pricing ? (offer.pricing.referencePrice ?? null) : hasLegacyDiscount(offer) ? offer.price : null;
+
+const hasLegacyDiscount = (offer: ProductBoutique): boolean =>
   offer.discountPrice != null && offer.discountPrice < offer.price;
 
-/** Remise en pourcentage, arrondie — jamais affichée si elle est nulle. */
+/** L'offre s'affiche-t-elle « en promotion » (badge et prix barré) ? */
+export const hasDiscount = (offer: ProductBoutique): boolean =>
+  offer.pricing ? (offer.pricing.percent ?? 0) > 0 : hasLegacyDiscount(offer);
+
+/** Remise affichée, en pourcentage — jamais affichée si elle est nulle. */
 export const discountPercent = (offer: ProductBoutique): number | null => {
-  if (!hasDiscount(offer) || offer.price <= 0) return null;
+  if (offer.pricing) return offer.pricing.percent ? offer.pricing.percent : null;
+  if (!hasLegacyDiscount(offer) || offer.price <= 0) return null;
   return Math.round((1 - effectivePrice(offer) / offer.price) * 100);
+};
+
+/** Fin de la promotion en cours, si elle en a une (le prix par quantité n'en a pas). */
+export const promotionEnd = (offer: ProductBoutique): string | null => {
+  const end = offer.pricing?.endsAt;
+  return end && new Date(end).getFullYear() < 9000 ? end : null;
+};
+
+export const isFlashSale = (offer: ProductBoutique): boolean => !!offer.pricing?.promotion?.flash;
+
+/** Prix d'une unité pour une quantité : le palier atteint, s'il est plus bas. */
+export const unitPriceFor = (offer: ProductBoutique, quantity: number): number => {
+  const base = effectivePrice(offer);
+  const tiers = (offer.pricing?.tiers ?? []).filter((tier) => quantity >= tier.minQuantity);
+  return tiers.reduce((lowest, tier) => Math.min(lowest, tier.unitPrice), base);
 };
 
 export const isOutOfStock = (offer: ProductBoutique): boolean => offer.stock <= 0;

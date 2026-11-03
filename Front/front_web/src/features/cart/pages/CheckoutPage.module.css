@@ -178,3 +178,14 @@
     padding: var(--space-4);
   }
 }
+
+.coupon {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.coupon > :first-child {
+  flex: 1;
+}

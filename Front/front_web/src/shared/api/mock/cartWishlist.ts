@@ -2,8 +2,10 @@ import type { ProductBoutique } from "../../../entities/product";
 import { CURRENCY, type DeliveryQuote } from "../../../entities/delivery";
 import { ApiError } from "../ApiError";
 import type { ApiResponse } from "../httpClient";
-import { quoteDelivery, readSelection } from "./deliveryRules";
+import { quoteDelivery, readSelection, type FreeShippingByShop } from "./deliveryRules";
 import { findLiveOffer } from "./liveCatalog";
+import { recordBoostCartAdd, unitPrice as unitPriceOf } from "./marketing";
+import { freeShippingRules } from "./marketingPricing";
 import { readDb, writeDb } from "./mockDb";
 
 // ─────────────────────────────────────────────
@@ -61,11 +63,16 @@ export interface CartItemDto {
   productId?: string | undefined;
   productName?: string | undefined;
   urlImages: string[];
-  /** Prix courant de l'offre, indicatif. */
+  /** Prix de base de l'offre. */
   price: number;
   discountPrice?: number | null | undefined;
-  /** Prix figé au moment de l'ajout. */
+  /** Prix unitaire en vigueur pour cette quantité : promotion et palier compris. */
   unitPrice: number;
+  /** Prix unitaire vu à l'ajout. */
+  addedUnitPrice: number;
+  priceChanged: boolean;
+  savings: number;
+  pricing?: ProductBoutique["pricing"];
   quantity: number;
   stock: number;
   lineTotal: number;
@@ -77,6 +84,7 @@ export interface CartDto {
   items: CartItemDto[];
   totalItems: number;
   totalAmount: number;
+  totalSavings: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -121,18 +129,23 @@ const toCartDto = (cart: {
   const items: CartItemDto[] = cart.items.map((item) => {
     const pb = findLiveOffer(item.productBoutiqueId);
 
-    // `unitPrice` est le prix figé ; `price` et `discountPrice` sont les prix
-    // courants. Le DTO expose les deux, donc l'écart est affichable.
-    const unitPrice = item.price;
+    // Le prix en vigueur fait foi (le checkout le recalcule) ; le prix vu à
+    // l'ajout ne sert qu'à signaler l'écart.
+    const unitPrice = pb ? unitPriceOf(pb, item.quantity) : item.price;
+    const basePrice = pb?.price ?? unitPrice;
 
     return {
       productBoutiqueId: item.productBoutiqueId,
       productId: pb?.productId,
       productName: pb?.product?.name,
       urlImages: pb?.urlImages ?? [],
-      price: pb?.price ?? unitPrice,
+      price: basePrice,
       ...(pb?.discountPrice != null ? { discountPrice: pb.discountPrice } : {}),
       unitPrice,
+      addedUnitPrice: item.price,
+      priceChanged: unitPrice !== item.price,
+      savings: Math.max(0, basePrice - unitPrice) * item.quantity,
+      ...(pb?.pricing ? { pricing: pb.pricing } : {}),
       quantity: item.quantity,
       stock: pb?.stock ?? 0,
       lineTotal: unitPrice * item.quantity,
@@ -144,7 +157,8 @@ const toCartDto = (cart: {
     userId: cart.userId,
     items,
     totalItems: items.reduce((total, item) => total + item.quantity, 0),
-    totalAmount: cart.amount,
+    totalAmount: items.reduce((total, item) => total + item.lineTotal, 0),
+    totalSavings: items.reduce((total, item) => total + item.savings, 0),
     createdAt: cart.createdAt,
     updatedAt: cart.updatedAt,
   };
@@ -185,7 +199,8 @@ export const addToCart = (
     throw new ApiError(`Stock insuffisant (disponible : ${pb.stock})`, 400);
   }
 
-  const unitPrice = pb.discountPrice ?? pb.price;
+  // Prix du moment pour cette quantité : promotion et palier compris.
+  const unitPrice = unitPriceOf(pb, newQuantity);
 
   if (existing) {
     existing.quantity = newQuantity;
@@ -197,6 +212,8 @@ export const addToCart = (
 
   recomputeAmount(cart);
   cart.updatedAt = new Date().toISOString();
+  // Un ajout après une visite d'un boost compte dans ses statistiques.
+  recordBoostCartAdd(db, userId, pb.id);
   writeDb(db);
 
   return ok(toCartDto(cart), "Article ajouté au panier avec succès");
@@ -227,6 +244,8 @@ export const updateCartItem = (
       throw new ApiError(`Stock insuffisant (disponible : ${pb.stock})`, 400);
     }
     cart.items[index]!.quantity = body.quantity;
+    // Un palier peut changer le prix avec la quantité.
+    cart.items[index]!.price = unitPriceOf(pb, body.quantity);
   }
 
   recomputeAmount(cart);
@@ -287,7 +306,8 @@ export const deliveryQuote = (
   const { selection, errors } = readSelection(body);
   if (errors.length > 0) throw new ApiError(errors.join(" | "), 422);
 
-  const cart = readDb().carts.find((entry) => entry.userId === userId);
+  const db = readDb();
+  const cart = db.carts.find((entry) => entry.userId === userId);
   if (!cart || cart.items.length === 0) {
     return ok(
       { groups: [], shippingFee: 0, ready: false, currency: CURRENCY, subtotal: 0, total: 0 },
@@ -301,11 +321,25 @@ export const deliveryQuote = (
     return offer ? [{ offer, quantity: item.quantity }] : [];
   });
 
-  const quote = quoteDelivery(lines, selection);
+  // Sous-total aux prix du moment (le checkout les recalcule) ; livraison
+  // offerte quand la part d'une boutique atteint son seuil.
+  const subtotals = new Map<string, number>();
+  let subtotal = 0;
+  for (const { offer, quantity } of lines) {
+    const lineTotal = unitPriceOf(offer, quantity) * quantity;
+    subtotal += lineTotal;
+    const key = offer.boutique?.id ?? "";
+    subtotals.set(key, (subtotals.get(key) ?? 0) + lineTotal);
+  }
+  const rules = freeShippingRules(db, [...subtotals.keys()]);
+  const freeShipping: FreeShippingByShop = new Map(
+    [...rules].map(([shopId, rule]) => [shopId, { minAmount: rule.minAmount, subtotal: subtotals.get(shopId) ?? 0, label: rule.label }])
+  );
+  const quote = quoteDelivery(lines, selection, freeShipping);
 
   return ok(
     // Coupon exclu : il ne s'applique qu'au checkout, sur les articles.
-    { ...quote, subtotal: cart.amount, total: cart.amount + quote.shippingFee },
+    { ...quote, subtotal, total: subtotal + quote.shippingFee },
     "Devis de livraison calculé"
   );
 };

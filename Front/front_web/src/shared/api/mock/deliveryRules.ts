@@ -201,9 +201,13 @@ export const readSelection = (body: {
   };
 };
 
+/** Livraison offerte, par boutique : seuil, part du panier chez elle, libellé. */
+export type FreeShippingByShop = ReadonlyMap<string, { minAmount: number; subtotal: number; label: string }>;
+
 export const quoteDelivery = (
   lines: QuoteLine[],
-  selection: QuoteSelection = {}
+  selection: QuoteSelection = {},
+  freeShipping?: FreeShippingByShop
 ): Omit<DeliveryQuote, "subtotal" | "total"> => {
   const byShop = new Map<string, QuoteLine[]>();
   for (const line of lines) {
@@ -262,6 +266,18 @@ export const quoteDelivery = (
       };
     }
 
+    // Livraison offerte : les frais tombent à 0 quand la part atteint le seuil.
+    const offer = freeShipping?.get(boutiqueId);
+    if (offer) {
+      const applied = offer.subtotal >= offer.minAmount;
+      return {
+        ...base,
+        options,
+        selectedMethod: option.method,
+        fee: applied ? 0 : option.fee,
+        freeShipping: { threshold: offer.minAmount, applied, remaining: Math.max(0, offer.minAmount - offer.subtotal), label: offer.label },
+      };
+    }
     return { ...base, options, selectedMethod: option.method, fee: option.fee };
   });
 

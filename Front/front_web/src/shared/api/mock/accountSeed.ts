@@ -52,8 +52,14 @@ export interface MockAddress {
 
 export interface MockOrderItem {
   productBoutiqueId: string;
+  /** Prix payé à l'unité (promotion et palier compris). */
   price: number;
   quantity: number;
+  /** Prix catalogue au moment de l'achat : la remise d'une ligne en découle. */
+  basePrice?: number | undefined;
+  promotionId?: string | null | undefined;
+  promotionLabel?: string | undefined;
+  boostId?: string | null | undefined;
 }
 
 export interface MockOrder {
@@ -94,6 +100,8 @@ export interface MockShopOrder {
   items: MockOrderItem[];
   subtotal: number;
   discountAmount: number;
+  /** Part de la remise payée par la plateforme (code de la plateforme). */
+  platformDiscount?: number | undefined;
   deliveryFee: number;
   amount: number;
   delivery: OrderDelivery;

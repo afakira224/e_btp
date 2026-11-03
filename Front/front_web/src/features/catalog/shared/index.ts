@@ -1,5 +1,7 @@
 export { ProductCard } from "./components/ProductCard";
 export { RatingStars } from "./components/RatingStars";
+export { SponsoredNote } from "./components/SponsoredNote";
+export { useSponsored, withSponsored } from "./hooks/useSponsored";
 export { Breadcrumb, type Crumb } from "./components/Breadcrumb";
 export {
   CatalogHeader,
@@ -32,6 +34,12 @@ export {
   type ProductPage,
   fetchNewArrivals,
   fetchOffer,
+  fetchFeaturedOffers,
+  fetchSponsored,
+  fetchCampaign,
+  fetchCampaigns,
+  offerPath,
+  type SponsoredSlot,
   fetchOtherOffers,
   fetchRecentlyViewed,
   fetchShopOffers,

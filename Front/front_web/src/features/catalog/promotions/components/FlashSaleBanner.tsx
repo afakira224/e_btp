@@ -42,6 +42,10 @@ export const FlashSaleBanner = ({ promotion }: { promotion: Promotion }) => {
         {promotion.description ? <p className={styles.text}>{promotion.description}</p> : null}
 
         <ul className={styles.meta}>
+          {promotion.boutique ? <li>{`Chez ${promotion.boutique.nom}`}</li> : null}
+          {promotion.flashLeft !== undefined ? (
+            <li>{promotion.flashLeft > 0 ? `Plus que ${promotion.flashLeft} au prix flash` : "Quantité épuisée"}</li>
+          ) : null}
           {articles > 0 ? (
             <li>
               {articles} article{articles > 1 ? "s" : ""} concerné{articles > 1 ? "s" : ""}

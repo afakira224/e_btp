@@ -8,12 +8,16 @@ import {
   discountPercent,
   effectivePrice,
   formatPrice,
-  hasDiscount,
+  isFlashSale,
   isLowStock,
   isNew,
   isOutOfStock,
+  promotionEnd,
+  referencePrice,
   type ProductBoutique,
 } from "../../../../entities/product";
+import { offerPath } from "../api/catalog.api";
+import { SponsoredNote } from "./SponsoredNote";
 import { useAuth } from "../../../auth";
 import { useCart } from "../../../cart";
 import { useWishlist } from "../../../wishlist";
@@ -34,7 +38,11 @@ export const ProductCard = ({ item }: ProductCardProps) => {
   const [busy, setBusy] = useState(false);
 
   const remise = discountPercent(item);
+  const barre = referencePrice(item);
+  const flash = isFlashSale(item);
+  const fin = promotionEnd(item);
   const rupture = isOutOfStock(item);
+  const lien = offerPath(item);
   const favori = has(item.id);
 
   // Panier et favoris sont des ressources rattachées à un compte : hors
@@ -63,6 +71,7 @@ export const ProductCard = ({ item }: ProductCardProps) => {
     <article className={styles.card}>
       <div className={styles.media}>
         <div className={styles.flags}>
+          {flash ? <Badge tone="solid">Vente flash</Badge> : null}
           {remise !== null ? <Badge tone="accent">{`−${remise} %`}</Badge> : null}
           {isNew(item) ? <Badge tone="neutral">Nouveau</Badge> : null}
         </div>
@@ -101,7 +110,7 @@ export const ProductCard = ({ item }: ProductCardProps) => {
           <span className={styles.shop}>{shopName(item)}</span>
         )}
         <h3 className={styles.name}>
-          <Link className={styles.nameLink} to={`/produits/${item.id}`}>
+          <Link className={styles.nameLink} to={lien}>
             {productName(item)}
           </Link>
         </h3>
@@ -112,10 +121,14 @@ export const ProductCard = ({ item }: ProductCardProps) => {
 
         <div className={styles.prices}>
           <span className={styles.price}>{formatPrice(effectivePrice(item))}</span>
-          {hasDiscount(item) ? (
-            <span className={styles.was}>{formatPrice(item.price)}</span>
-          ) : null}
+          {barre !== null ? <span className={styles.was}>{formatPrice(barre)}</span> : null}
         </div>
+        {remise !== null && fin ? (
+          <span className={styles.until}>
+            {`Jusqu'au ${new Date(fin).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`}
+          </span>
+        ) : null}
+        {item.sponsored ? <SponsoredNote sponsored={item.sponsored} /> : null}
       </div>
 
       <div className={styles.footer}>

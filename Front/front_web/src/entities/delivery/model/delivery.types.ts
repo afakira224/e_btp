@@ -106,6 +106,8 @@ export interface DeliveryGroupQuote {
   fee: number | null;
   /** Ce qui empêche cette livraison de partir. */
   error?: string | undefined;
+  /** Livraison offerte par la boutique dès un montant : appliquée, ou ce qu'il reste à ajouter. */
+  freeShipping?: { threshold: number; applied: boolean; remaining: number; label: string } | undefined;
 }
 
 export interface DeliveryQuote {

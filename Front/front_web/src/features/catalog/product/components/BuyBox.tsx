@@ -6,11 +6,15 @@ import {
   discountPercent,
   effectivePrice,
   formatPrice,
-  hasDiscount,
+  isFlashSale,
   isLowStock,
   isOutOfStock,
+  promotionEnd,
+  referencePrice,
+  unitPriceFor,
   type ProductBoutique,
 } from "../../../../entities/product";
+import { useCountdown } from "../../../../shared/hooks/useCountdown";
 import {
   DELIVERY_MODE_BUYER_HINTS,
   DELIVERY_MODE_LABELS,
@@ -40,7 +44,12 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
   const suspendedUntil = item.boutique?.suspendedUntil;
   const rupture = isOutOfStock(item) || !!suspendedUntil;
   const remise = discountPercent(item);
-  const economie = item.price - effectivePrice(item);
+  const barre = referencePrice(item);
+  const economie = (barre ?? item.price) - effectivePrice(item);
+  const fin = promotionEnd(item);
+  const flash = isFlashSale(item);
+  const paliers = item.pricing?.tiers ?? [];
+  const prixQuantite = unitPriceFor(item, quantity);
 
   // La quantité ne peut jamais dépasser le stock : le serveur refuserait,
   // autant ne pas laisser l'utilisateur composer une commande impossible.
@@ -69,17 +78,57 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
 
   return (
     <div className={styles.buy}>
+      {flash && fin ? <FlashTimer end={fin} label={item.pricing?.promotion?.label} /> : null}
+
       <div className={styles.prices}>
         <span className={styles.price}>{formatPrice(effectivePrice(item))}</span>
-        {hasDiscount(item) ? (
-          <span className={styles.was}>{formatPrice(item.price)}</span>
-        ) : null}
+        {barre !== null ? <span className={styles.was}>{formatPrice(barre)}</span> : null}
       </div>
 
       {remise !== null ? (
         <p className={styles.saving}>
           {`Vous économisez ${formatPrice(economie)} (−${remise} %)`}
+          {fin && !flash ? ` · jusqu'au ${new Date(fin).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}` : ""}
         </p>
+      ) : null}
+      {barre !== null ? (
+        <p className={styles.reference}>Prix barré : le plus bas pratiqué par la boutique sur les 30 derniers jours.</p>
+      ) : null}
+
+      {/* Prix par quantité : le client paie le plus bas du prix promo et du palier atteint. */}
+      {paliers.length > 0 ? (
+        <section className={styles.tiers} aria-labelledby="paliers-titre">
+          <h2 id="paliers-titre" className={styles.deliveryTitle}>
+            Prix par quantité
+          </h2>
+          <table className={styles.tiersTable}>
+            <thead>
+              <tr>
+                <th scope="col">Quantité</th>
+                <th scope="col">Prix à l'unité</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className={quantity < (paliers[0]?.minQuantity ?? 2) ? styles.tierOn : undefined}>
+                <td>{`1 à ${(paliers[0]?.minQuantity ?? 2) - 1}`}</td>
+                <td>{formatPrice(effectivePrice(item))}</td>
+              </tr>
+              {paliers.map((tier, index) => {
+                const next = paliers[index + 1]?.minQuantity;
+                const on = quantity >= tier.minQuantity && (next === undefined || quantity < next);
+                return (
+                  <tr key={tier.minQuantity} className={on ? styles.tierOn : undefined}>
+                    <td>{next ? `${tier.minQuantity} à ${next - 1}` : `${tier.minQuantity} et plus`}</td>
+                    <td>{`${formatPrice(tier.unitPrice)} (−${tier.percent} %)`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {quantity > 1 ? (
+            <p className={styles.deliveryNote}>{`Pour ${quantity} : ${formatPrice(prixQuantite)} l'unité, soit ${formatPrice(prixQuantite * quantity)}.`}</p>
+          ) : null}
+        </section>
       ) : null}
 
       <span className={styles.stock}>
@@ -196,5 +245,24 @@ export const BuyBox = ({ item }: BuyBoxProps) => {
         </div>
       ) : null}
     </div>
+  );
+};
+
+const pad = (value: number) => String(value).padStart(2, "0");
+
+/** Vente flash : le temps qui reste, en clair pour les lecteurs d'écran à côté du compteur. */
+const FlashTimer = ({ end, label }: { end: string; label?: string | undefined }) => {
+  const countdown = useCountdown(end);
+  if (countdown.expired) return null;
+  const hours = countdown.days * 24 + countdown.hours;
+  return (
+    <p className={styles.flash}>
+      <span className={styles.flashTag}>Vente flash</span>
+      {label ? <span className={styles.flashLabel}>{label}</span> : null}
+      <span className={styles.flashTime} aria-hidden="true">
+        {`${pad(hours)}:${pad(countdown.minutes)}:${pad(countdown.seconds)}`}
+      </span>
+      <span className={styles.visuallyHidden}>{`Se termine le ${new Date(end).toLocaleString("fr-FR")}`}</span>
+    </p>
   );
 };

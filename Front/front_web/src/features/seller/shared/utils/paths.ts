@@ -24,6 +24,20 @@ export const sellerPaths = {
     }
     return `${shop(shopId)}/support/nouvelle?${query.toString()}`;
   },
+  /** Promotions de la boutique, par onglet. */
+  promotions: (shopId: string, tab?: string) => `${shop(shopId)}/promotions${tab ? `?onglet=${tab}` : ""}`,
+  newPromotion: (shopId: string, type?: string) => `${shop(shopId)}/promotions/nouvelle${type ? `?type=${type}` : ""}`,
+  editPromotion: (shopId: string, promotionId: string) => `${shop(shopId)}/promotions/${encodeURIComponent(promotionId)}/modifier`,
+  /** Mise en avant : boosts, crédits et produits phares. */
+  boosts: (shopId: string, tab?: string) => `${shop(shopId)}/mise-en-avant${tab ? `?onglet=${tab}` : ""}`,
+  newBoost: (shopId: string, from?: { promotionId?: string; offerIds?: string[] }) => {
+    const query = new URLSearchParams();
+    if (from?.promotionId) query.set("promotion", from.promotionId);
+    if (from?.offerIds?.length) query.set("produits", from.offerIds.join(","));
+    const search = query.toString();
+    return `${shop(shopId)}/mise-en-avant/booster${search ? `?${search}` : ""}`;
+  },
+  boost: (shopId: string, boostId: string) => `${shop(shopId)}/mise-en-avant/boosts/${encodeURIComponent(boostId)}`,
   delivery: (shopId: string) => `${shop(shopId)}/livraison`,
   info: (shopId: string) => `${shop(shopId)}/informations`,
   /** Vitrine publique de la boutique, telle que les clients la voient. */

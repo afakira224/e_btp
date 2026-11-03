@@ -8,9 +8,10 @@ import { SearchBar } from "../../features/search";
 import { EntityType, getInitials, type User } from "../../entities/user";
 import styles from "./SiteHeader.module.css";
 
+// La livraison offerte est une promotion de chaque boutique (son seuil
+// s'affiche au panier) : aucune promesse générale ici.
 const ANNOUNCEMENTS = [
-  "Livraison chantier offerte dès 2 000 000 GNF",
-  "Déstockage — jusqu'à 20 % sur une sélection",
+  "Promotions des dépôts : le prix barré est le plus bas des 30 derniers jours",
   "Retrait en dépôt sous 2 heures",
 ];
 

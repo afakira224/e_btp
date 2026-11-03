@@ -87,6 +87,7 @@ export const SUPPORT_REASONS: Record<SupportTicketType, Readonly<Record<string, 
     misleading: "Description trompeuse",
     abusive_price: "Prix abusif",
     stolen_photos: "Photos d'un autre vendeur",
+    fake_discount: "Faux prix barré",
     other: "Autre",
   },
   shop_report: {
@@ -231,6 +232,7 @@ export const SanctionType = {
   WARNING: "warning",
   SUSPENSION: "suspension",
   BLOCK: "block",
+  PROMO_BAN: "promo_ban",
 } as const;
 export type SanctionType = (typeof SanctionType)[keyof typeof SanctionType];
 
@@ -241,6 +243,7 @@ export const SANCTION_LABELS: Record<SanctionType, string> = {
   warning: "Avertissement",
   suspension: "Suspension",
   block: "Blocage",
+  promo_ban: "Promotions suspendues",
 };
 
 /** Quelle mesure vise quoi. */
@@ -249,6 +252,7 @@ export const SANCTION_TARGETS: Record<SanctionType, readonly SanctionTargetKind[
   warning: ["shop", "user"],
   suspension: ["shop"],
   block: ["user"],
+  promo_ban: ["shop"],
 };
 
 export const SANCTION_TARGET_LABELS: Record<SanctionTargetKind, string> = {

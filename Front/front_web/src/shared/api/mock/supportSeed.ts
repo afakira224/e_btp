@@ -85,9 +85,11 @@ export interface MockModeration {
   hiddenOffers: Record<string, { at: string; reason: string }>;
   suspendedShops: Record<string, string>;
   blockedUsers: Record<string, string>;
+  /** Boutique → fin de la sanction « promotions suspendues ». */
+  promotionsBlocked?: Record<string, string>;
 }
 
-export const EMPTY_MODERATION: MockModeration = { hiddenOffers: {}, suspendedShops: {}, blockedUsers: {} };
+export const EMPTY_MODERATION: MockModeration = { hiddenOffers: {}, suspendedShops: {}, blockedUsers: {}, promotionsBlocked: {} };
 
 export const PLATFORM_NAME = "Équipe de la plateforme";
 

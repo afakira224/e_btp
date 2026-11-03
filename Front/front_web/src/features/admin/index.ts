@@ -4,3 +4,4 @@ export { AdminGuard, adminPaths } from "./shared";
 export { AdminOrdersPage, AdminShopOrderPage } from "./orders";
 export { AdminSupportPage, AdminSupportTicketPage } from "./support";
 export { ShopRequestReviewPage, ShopRequestsPage } from "./shop-requests";
+export { AdminMarketingPage } from "./marketing";

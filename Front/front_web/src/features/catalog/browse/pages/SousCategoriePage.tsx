@@ -15,6 +15,7 @@ import {
   fetchSousCategorie,
   useInfiniteProducts,
   useResource,
+  useSponsored,
 } from "../../shared";
 
 const PAGE_SIZE = 8;
@@ -42,6 +43,8 @@ export const SousCategoriePage = () => {
     pageSize: PAGE_SIZE,
     key: sousCategorieId,
   });
+  // Deux places sponsorisées en tête, pertinentes pour cette rubrique.
+  const sponsorises = useSponsored("category", { sousCategoryId: sousCategorieId });
   const familles = useResource(fetchFamilles, []);
 
   if (sous.error) {
@@ -121,6 +124,8 @@ export const SousCategoriePage = () => {
           ) : null}
 
           <InfiniteProductGrid
+
+            sponsored={sponsorises.data}
             {...produits}
             pageSize={PAGE_SIZE}
             empty={{

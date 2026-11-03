@@ -117,7 +117,13 @@ const Line = ({
 
         <span className={styles.unit}>
           {formatPrice(item.unitPrice)} l'unité
+          {item.unitPrice < item.price ? <span className={styles.was}>{formatPrice(item.price)}</span> : null}
         </span>
+        {item.savings ? (
+          <span className={[styles.warn, styles.success].join(" ")}>
+            {`Économie : ${formatPrice(item.savings)}${item.pricing?.promotion ? ` · ${item.pricing.promotion.label}` : ""}`}
+          </span>
+        ) : null}
 
         {rupture ? (
           <span className={[styles.warn, styles.danger].join(" ")}>
@@ -130,8 +136,9 @@ const Line = ({
         ) : null}
 
         {priceChanged(item) ? (
-          <span className={[styles.warn, styles.info].join(" ")}>
-            Prix actuel : {formatPrice(currentPrice(item))} (
+          <span className={[styles.warn, delta > 0 ? styles.danger : styles.info].join(" ")}>
+            {delta > 0 ? "La promotion est terminée : " : "Bonne nouvelle, le prix a baissé : "}
+            {formatPrice(currentPrice(item))} l'unité (
             {delta > 0 ? "+" : "−"}
             {formatPrice(Math.abs(delta))} depuis l'ajout)
           </span>
@@ -313,6 +320,12 @@ export const CartPage = () => {
             <span>Sous-total</span>
             <span>{formatPrice(cart.totalAmount)}</span>
           </div>
+          {cart.totalSavings ? (
+            <div className={[styles.row, styles.savings].join(" ")}>
+              <span>Vos économies</span>
+              <span>{`−${formatPrice(cart.totalSavings)}`}</span>
+            </div>
+          ) : null}
 
           <section className={styles.delivery} aria-labelledby="cart-delivery-title" aria-busy={delivery.isLoading}>
             <h3 id="cart-delivery-title" className={styles.deliveryTitle}>
@@ -334,6 +347,13 @@ export const CartPage = () => {
                         {group.selectedMethod === DeliveryMode.PICKUP && group.pickupAdresse
                           ? `Retrait : ${group.pickupAdresse}`
                           : DELIVERY_MODE_LABELS[group.selectedMethod]}
+                      </span>
+                    ) : null}
+                    {group.freeShipping ? (
+                      <span className={styles.shipmentMode}>
+                        {group.freeShipping.applied
+                          ? `${group.freeShipping.label} : livraison offerte`
+                          : `Plus que ${formatPrice(group.freeShipping.remaining)} chez ${group.boutiqueNom ?? "cette boutique"} pour la livraison offerte`}
                       </span>
                     ) : null}
                     {group.error ? (

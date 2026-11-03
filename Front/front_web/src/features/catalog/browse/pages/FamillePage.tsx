@@ -13,6 +13,7 @@ import {
   fetchProductsBy,
   useInfiniteProducts,
   useResource,
+  useSponsored,
 } from "../../shared";
 import { CategorieTile, CategorieTiles } from "../components/CategorieTile";
 import styles from "./FamillePage.module.css";
@@ -42,6 +43,8 @@ export const FamillePage = () => {
     pageSize: PAGE_SIZE,
     key: familleId,
   });
+  // Deux places sponsorisées en tête, pertinentes pour cette rubrique.
+  const sponsorises = useSponsored("category", { familleId: familleId });
 
   if (famille.error) {
     return (
@@ -89,6 +92,7 @@ export const FamillePage = () => {
           <div className={styles.produits}>
             <h2 className={styles.produitsTitre}>Produits du domaine</h2>
             <InfiniteProductGrid
+              sponsored={sponsorises.data}
               {...produits}
               pageSize={PAGE_SIZE}
               empty={{

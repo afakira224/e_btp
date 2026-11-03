@@ -8,6 +8,7 @@ import {
   toSettingsDto,
 } from "./deliveryRules";
 import { readDb, type MockOffer, type MockProductDelivery, type MockShopDelivery } from "./mockDb";
+import { withPricing } from "./marketingPricing";
 
 // ─────────────────────────────────────────────
 //  Catalogue vivant.
@@ -129,7 +130,8 @@ export const liveCatalog = (): ProductBoutique[] => {
   const added = [...readDb().offers]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((offer) => fromSeller(offer, shops));
-  return [...added, ...OFFERS.map((offer) => fromSeed(offer, shops))].map(withModeration);
+  // Prix des promotions en vigueur, calculés à la lecture (le back les recopie sur l'offre).
+  return withPricing(readDb(), [...added, ...OFFERS.map((offer) => fromSeed(offer, shops))].map(withModeration));
 };
 
 /** Ce que le public voit : sans les offres masquées par la modération. */

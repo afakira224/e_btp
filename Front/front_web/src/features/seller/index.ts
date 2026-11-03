@@ -11,3 +11,12 @@ export { ShopNewTicketPage, ShopSupportPage, ShopSupportTicketPage } from "./sup
 export { ShopDeliveryPage } from "./delivery";
 export { OfferFormPage, OffersPage } from "./products";
 export { ShopInfoPage } from "./settings";
+export {
+  BoostDetailPage,
+  BoostFormPage,
+  CreditPaymentPage,
+  parseCreditPaymentId,
+  PromotionFormPage,
+  ShopBoostsPage,
+  ShopPromotionsPage,
+} from "./marketing";

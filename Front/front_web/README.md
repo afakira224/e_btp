@@ -497,6 +497,32 @@ plus au panier ; un compte bloqué ne se connecte plus.
 Le front ne liste pas encore les avis : un avis se signale par l'API
 (`type: review_report`), sans bouton à l'écran.
 
+## Promotions et mise en avant
+
+Chaque boutique planifie et lance seule ses promotions et ses boosts : aucune
+validation. Le prix affiché vient du serveur (`pricing` sur chaque offre) ;
+le front ne calcule aucune remise.
+
+| Qui | Où | Ce qu'il voit ou fait |
+| --- | --- | --- |
+| Client | catalogue, fiche, panier | Prix barré (le plus bas des 30 derniers jours, dès 5 % de remise), badge « Vente flash » et compte à rebours, date de fin, tableau des prix par quantité ; au panier, l'économie de chaque ligne, un prix qui a changé depuis l'ajout, ce qu'il manque pour la livraison offerte d'une boutique ; un code de réduction au moment de commander |
+| Client | `/promotions`, `/campagnes/:slug` | Ventes flash en cours, bandeaux des campagnes de la plateforme, articles remisés (tri « plus forte remise ») ; la page d'une campagne et ses offres |
+| Client | accueil, recherche, rubriques, fiche, Promotions | Places **sponsorisées** : 4 dans « Sélection pour vous », 2 en tête d'une recherche ou d'une rubrique, 2 parmi les produits similaires, 4 sur Promotions — toujours marquées « Sponsorisé · Pourquoi je vois ceci ? » |
+| Client | vitrine d'une boutique | Ses « Produits phares » en tête |
+| Boutique | `/ma-boutique/:id/promotions` | Onglets en cours · programmées · terminées, ventes de chaque promotion, actions (lancer, pause, reprendre, prolonger, arrêter) ; « Nouvelle promotion » en 4 étapes (type, produits, remise et dates, lancement) ; inscription aux campagnes ; bandeau quand la modération suspend ses promotions |
+| Boutique | `/ma-boutique/:id/mise-en-avant` | Crédits de boost (solde, recharge, historique), boosts en cours et terminés avec leurs résultats, produits phares (6, dans l'ordre) ; « Booster » une promotion ou des produits : objectif, audience, budget, durée, estimation en direct |
+| Administration | `/admin/promotions` | Campagnes de la plateforme, prix des boosts, boosts en cours ; au support, le motif « Faux prix barré » et la mesure « Promotions suspendues » |
+
+La recharge de crédits passe par la même page de paiement simulé que les
+commandes (`/paiement/credits-<boutique>-<recharge>`).
+
+En mode simulé, les prix sont recalculés à chaque lecture
+(`shared/api/mock/marketingPricing.ts`, portage du moteur du back), et une
+audience de boost est estimée sur une population fictive de 2 400 clients. En
+développement, le mode strict de React lance chaque lecture deux fois : le
+plafond de 3 affichages par jour et par client d'un boost s'atteint donc deux
+fois plus vite qu'en production.
+
 ## Ouverture d'une boutique
 
 Un client connecté demande l'ouverture d'une boutique ; l'administration
@@ -537,7 +563,8 @@ de son compte.
 Une **application de travail à part du site marchand** : ni bandeau
 promotionnel, ni recherche, ni panier. Barre sombre en haut (marque, compte,
 thème, déconnexion), menu latéral sombre (tableau de bord, commandes et support
-avec le nombre à traiter, produits, livraison, informations, lien vers la vitrine),
+avec le nombre à traiter, produits, promotions, mise en avant, livraison,
+informations, lien vers la vitrine),
 contenu clair : l'architecture « header + sidebar » de la charte graphique.
 Sur mobile, le menu devient un tiroir.
 
@@ -549,8 +576,9 @@ Sur mobile, le menu devient un tiroir.
 - **Tableau de bord** : le nombre de commandes à chaque étape (à confirmer et
   problèmes signalés dès qu'il y en a), les commandes à confirmer avec leur
   échéance, les problèmes en cours, les réclamations à traiter, les produits en
-  stock bas, des raccourcis ; une alerte quand la boutique est suspendue ou
-  qu'une annonce est masquée.
+  stock bas, les promotions et boosts en cours et le solde de crédits, des
+  raccourcis ; une alerte quand la boutique est suspendue ou qu'une annonce est
+  masquée.
 - **Commandes** : voir « Cycle de vie des commandes ». Le compteur du menu se
   relit après chaque action et toutes les 2 minutes.
 - « Se déconnecter » ramène à la connexion de l'espace ; la page quittée n'est
@@ -579,8 +607,9 @@ inutile.
 - Les validations (au moins un mode, tarif entier > 0, adresse pour le retrait)
   reprennent celles du back, messages compris, pour éviter un aller-retour ; le
   serveur revalide tout.
-- Le formulaire produit ne touche pas au prix remisé ni aux étiquettes : ces
-  champs restent tels quels en modification.
+- Le formulaire produit ne touche ni au prix remisé ni aux étiquettes : une
+  remise se crée dans Promotions, et le prix barré s'affiche seul. Chaque
+  produit a un lien « Booster ».
 
 ### Listes en défilement infini
 
