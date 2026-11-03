@@ -11,6 +11,7 @@ import { toFamilleResponseDto, type FamilleResponseDto } from "./Famille.interfa
 import { toShopResponseDto, type ShopResponseDto } from "./Shop.interfaces.js";
 import { toEffectiveDeliveryDto, type EffectiveDeliveryDto } from "./Delivery.interfaces.js";
 import { toSousCategorieResponseDto, type SousCategorieResponseDto } from "./SousCategorie.interfaces.js";
+import { discountedPrice, unitPriceFor } from "../helpers/promotion.rules.js";
 
 // ─────────────────────────────────────────────
 export interface ProductResponseDto {
@@ -42,6 +43,53 @@ export const toProductResponseDto = (product: IProduct,familles:IFamille[] =[],c
 });
 
 // ─────────────────────────────────────────────
+//  PRIX D'UNE OFFRE
+//  Calculé par le serveur : le front affiche, il ne compare pas lui-même
+//  price et discountPrice.
+// ─────────────────────────────────────────────
+export interface OfferPricingDto {
+  /** Prix de base de l'offre, avant promotion. */
+  basePrice: number;
+  /** Prix d'une unité, promotion comprise. */
+  price: number;
+  /** Prix barré, le plus bas des 30 derniers jours : présent seulement quand la remise affichée atteint 5 %. */
+  referencePrice?: number | undefined;
+  percent?: number | undefined;
+  endsAt?: Date | undefined;
+  promotion?: { id: string; type: string; label: string; flash: boolean; campaignId?: string | undefined } | undefined;
+  /** Prix par quantité : le prix unitaire à partir de chaque palier. */
+  tiers: { minQuantity: number; percent: number; unitPrice: number }[];
+}
+
+export const toOfferPricingDto = (offer: Pick<IProductBoutique, "price" | "discountPrice" | "promo" | "quantityTiers" | "stock">): OfferPricingDto => {
+  const promo = offer.promo;
+  // Une offre en rupture ne s'affiche plus « en promotion ».
+  const shown = !!promo && promo.percent > 0 && offer.stock > 0;
+  return {
+    basePrice: offer.price,
+    price: unitPriceFor(offer, 1),
+    ...(shown ? { referencePrice: promo.referencePrice, percent: promo.percent } : {}),
+    ...(promo
+      ? {
+          endsAt: promo.endsAt,
+          promotion: {
+            id: String(promo.promotionId),
+            type: promo.type,
+            label: promo.label,
+            flash: promo.flash,
+            ...(promo.campaignId ? { campaignId: String(promo.campaignId) } : {}),
+          },
+        }
+      : {}),
+    tiers: (offer.quantityTiers ?? []).map((tier) => ({
+      minQuantity: tier.minQuantity,
+      percent: tier.percent,
+      unitPrice: Math.min(unitPriceFor(offer, 1), discountedPrice(offer.price, undefined, tier.percent)),
+    })),
+  };
+};
+
+// ─────────────────────────────────────────────
 //  PRODUCT BOUTIQUE - RESPONSE DTO
 // ─────────────────────────────────────────────
 export interface ProductBoutiqueResponseDto {
@@ -54,9 +102,13 @@ export interface ProductBoutiqueResponseDto {
 
   urlImages: string[];
   price: number;
+  /** Prix promotionnel en vigueur (calculé) ; `pricing` dit tout le reste. */
   discountPrice?: number | undefined;
+  pricing: OfferPricingDto;
   stock: number;
   isFeatured: boolean;
+  /** Produit phare de la vitrine (1 à 6). */
+  featuredRank?: number | undefined;
   tags: string[];
   rating?: number | undefined;
   reviewsCount?: number | undefined;
@@ -97,9 +149,11 @@ export const toProductBoutiqueResponseDto = (
     : undefined,
   urlImages: productBoutique.urlImages,
   price: productBoutique.price,
-  discountPrice: productBoutique.discountPrice,
+  discountPrice: productBoutique.discountPrice ?? undefined,
+  pricing: toOfferPricingDto(productBoutique),
   stock: productBoutique.stock,
   isFeatured: productBoutique.isFeatured,
+  ...(productBoutique.featuredRank ? { featuredRank: productBoutique.featuredRank } : {}),
   tags: productBoutique.tags,
   rating: productBoutique.rating,
   reviewsCount: productBoutique.reviewsCount,

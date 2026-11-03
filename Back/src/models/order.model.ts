@@ -63,6 +63,13 @@ export interface IOrderItem {
   urlImages: string[];
   price: number; // prix unitaire figé
   quantity: number;
+  /** Prix de base de l'offre au checkout, avant promotion. */
+  basePrice?: number | undefined;
+  /** Promotion qui a fixé le prix de la ligne (remise, vente flash, palier). */
+  promotionId?: Types.ObjectId | null | undefined;
+  promotionLabel?: string | undefined;
+  /** Boost dont une visite a précédé la vente (7 jours). */
+  boostId?: Types.ObjectId | null | undefined;
 }
 
 // Une entrée de l'historique : qui a changé le statut, quand, et pourquoi.
@@ -122,6 +129,10 @@ export const orderItemSchema = new Schema<IOrderItem>(
     urlImages: { type: [String], default: [] },
     price: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },
+    basePrice: { type: Number, min: 0 },
+    promotionId: { type: Types.ObjectId, ref: "promotion", default: null },
+    promotionLabel: { type: String },
+    boostId: { type: Types.ObjectId, ref: "boost", default: null },
   },
   { _id: false }
 );

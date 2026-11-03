@@ -6,6 +6,8 @@ import { Product, productBoutique } from "../models/product.model.js";
 import { User } from "../models/user.model.js";
 import { Shop } from "../models/boutique.model.js";
 import { isShopSuspended } from "../shared/helpers/moderation.helper.js";
+import { unitPriceFor } from "../shared/helpers/promotion.rules.js";
+import { recordBoostCartAdd } from "../shared/services/boost.service.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { toCartResponseDto } from "../shared/interfaces/Cart.interfaces.js";
@@ -135,7 +137,8 @@ export const addToCart = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
-    const unitPrice = pb.discountPrice ?? pb.price;
+    // Prix du moment pour cette quantité : promotion et palier compris.
+    const unitPrice = unitPriceFor(pb, newQuantity);
 
     if (existing) {
       existing.quantity = newQuantity;
@@ -150,6 +153,9 @@ export const addToCart = async (req: Request, res: Response) => {
     await session.commitTransaction();
 
     const dto = await buildCartDto(cart);
+
+    // Un ajout après une visite d'un boost compte dans ses statistiques.
+    await recordBoostCartAdd(userId, pb._id).catch(() => undefined);
 
     logger.info(`Article ajouté au panier de ${userId}`);
 
@@ -224,6 +230,8 @@ export const updateCartItem = async (req: Request, res: Response) => {
         return res.status(response.statusCode).json(response);
       }
       cart.items[index]!.quantity = quantity;
+      // Un palier peut changer le prix avec la quantité.
+      cart.items[index]!.price = unitPriceFor(pb, quantity);
     }
 
     recomputeAmount(cart);

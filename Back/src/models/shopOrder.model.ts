@@ -122,8 +122,13 @@ export interface IShopOrder extends Document, BaseModel {
   reference: string;
   items: IOrderItem[];
   subtotal: number;
-  /** Part du coupon de la commande, répartie au prorata des sous-totaux. */
+  /** Part du coupon de la commande : au prorata pour un code de la plateforme, entière pour un code boutique. */
   discountAmount: number;
+  /**
+   * Part de `discountAmount` payée par la plateforme (code de la plateforme).
+   * Le client paie `amount` ; la boutique est réglée sur `amount + platformDiscount`.
+   */
+  platformDiscount: number;
   deliveryFee: number;
   /** = subtotal − discountAmount + deliveryFee */
   amount: number;
@@ -195,6 +200,7 @@ const shopOrderSchema = new Schema<IShopOrder>(
     items: { type: [orderItemSchema], required: true },
     subtotal: { type: Number, required: true, min: 0 },
     discountAmount: { type: Number, min: 0, default: 0 },
+    platformDiscount: { type: Number, min: 0, default: 0 },
     deliveryFee: { type: Number, min: 0, default: 0 },
     amount: { type: Number, required: true, min: 0 },
     delivery: { type: orderDeliverySchema, required: true },

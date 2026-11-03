@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth, requireRole, requireSelf } from "../../shared/middlewares/auth.middleware.js";
 import { EntityType } from "../../models/user.model.js";
 import {
+  setFeaturedProduct,
   createProductBoutique,
   deleteProductBoutique,
   getProductBoutiqueById,
@@ -12,6 +13,7 @@ import {
   updateProductBoutique,
 } from "../../controllers/productBoutique.controller.js";
 import { createProductBoutiqueForm, updateProductBoutiqueForm } from "../../shared/forms/product.form.js";
+import { featuredForm } from "../../shared/forms/marketing.form.js";
 import { uploadMedia, validateUploadedFileSize } from "../../shared/helpers/fileUpload.js";
 
 const productBoutiqueRouter = Router();
@@ -169,6 +171,15 @@ productBoutiqueRouter.get("/search", searchProductBoutiques);
  *             schema: { $ref: '#/components/schemas/BaseError' }
  */
 productBoutiqueRouter.get("/:id", getProductBoutiqueById);
+
+/**
+ * @swagger
+ * /product-boutiques/{id}/featured:
+ *   patch:
+ *     summary: Placer l'offre parmi les 6 produits phares de sa vitrine (rank 1 à 6), ou l'en retirer (null)
+ *     tags: [ProductBoutique]
+ */
+productBoutiqueRouter.patch("/:id/featured", requireAuth, requireRole(EntityType.SHOP, EntityType.ADMIN), featuredForm, setFeaturedProduct);
 
 /**
  * @swagger

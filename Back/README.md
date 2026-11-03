@@ -29,6 +29,7 @@ L'API écoute sur `http://localhost:5000`, la documentation Swagger sur
 | `npm run seed:reset` | Vide les collections du seed puis les remplit à nouveau |
 | `npm run seed:volume` | Vide, puis catalogue de volume (100 familles, 15 000 sous-catégories, 5,25 millions de produits) |
 | `npm run migrate:shop-orders` | Découpe les commandes existantes en sous-commandes par boutique (idempotente) |
+| `npm run migrate:promotions` | Change les prix remisés écrits à la main en promotions de boutique, et donne un premier prix à l'historique (idempotente) |
 | `npm test` | Suite de tests unitaires (aucune base requise) |
 | `npm run test:watch` | Tests en mode continu |
 | `npm run test:coverage` | Tests + rapport dans `coverage/index.html` |
@@ -41,7 +42,8 @@ L'API écoute sur `http://localhost:5000`, la documentation Swagger sur
 - 2 familles, 6 catégories et 22 sous-catégories ;
 - 6 boutiques, chacune avec son gérant ;
 - 32 produits et 32 offres, avec **5 photos chacun** dans `uploads/seed/products/`, servies sous `/uploads/seed/products/…` ;
-- une vente flash en cours et deux coupons (`BIENVENUE10`, `CHANTIER50`) ;
+- une vente flash en cours et deux coupons de la plateforme (`BIENVENUE10`, `CHANTIER50`) ;
+- des promotions de boutique de chaque type (remises produit, prix par quantité sur le ciment, livraison offerte chez Kaloum Céramique, code `VOLTA10`), une campagne « Rentrée chantier », des boosts et des crédits de boost ;
 - 18 avis ;
 - un compte client `mamadou@btp.com` avec 2 adresses, 6 commandes découpées en sous-commandes par boutique, des favoris et des produits récemment vus.
 
@@ -395,6 +397,7 @@ visée est prévenue par email avec le motif, et peut la contester.
 | `warning` | boutique, compte | aucun effet, compte dans le barème |
 | `suspension` (7, 15 ou 30 jours) | boutique | vitrine visible, panier et checkout refusés (`suspendedUntil`) |
 | `block` | compte | connexion refusée (423), sessions fermées, commandes non expédiées annulées, boutiques du gérant suspendues |
+| `promo_ban` (7, 15 ou 30 jours) | boutique | promotions et boosts arrêtés (budget rendu), aucun nouveau d'ici la date (`promotionsBlockedUntil`) |
 
 Le barème (`suggestSanction`, sur 12 mois) propose : avertissement, puis 7 jours,
 puis 30 jours de suspension pour une boutique ; avertissement puis blocage pour
@@ -421,6 +424,101 @@ lève le masquage en tranchant le signalement.
 
 Les emails vont à chaque partie qui n'est pas l'auteur ; ceux de l'équipe à
 `ADMIN_EMAIL`, responsable du support.
+
+## Promotions et mise en avant
+
+Chaque boutique **planifie et lance seule** ses promotions et ses boosts :
+aucune validation. L'administration crée les campagnes de la plateforme, règle
+le prix des boosts et traite après coup les signalements (« Faux prix barré »)
+et les sanctions (`promo_ban`).
+
+### Promotions de boutique
+
+| Type | Ce qu'il fait | Limites |
+| --- | --- | --- |
+| `product_discount` | remise sur 1 à 50 offres | 5 à 70 %, 30 jours |
+| `shop_discount` | remise sur la boutique, une famille ou une catégorie, avec exclusions | 5 à 70 %, 30 jours |
+| `coupon` | code valable sur les articles de la boutique seulement ; cumulable par défaut | 90 jours, 5 codes actifs |
+| `flash_sale` | forte remise de 2 à 72 heures sur 1 à 10 offres, quantité limitée (`flashSold`) | 2 par mois, 30 jours d'écart par offre |
+| `quantity_tiers` | jusqu'à 3 paliers (« −5 % dès 50 sacs ») sur une offre | sans fin |
+| `free_shipping` | livraison offerte dès un montant, sur la part de la boutique | 90 jours |
+
+Ventes flash et boosts s'ouvrent après **30 jours et 5 commandes livrées**.
+Au-delà de 50 %, la remise doit être confirmée (`confirmHighDiscount`).
+Parcours : `draft → scheduled / active → paused → ended / stopped`, avec les
+actions `launch`, `pause`, `resume`, `extend` et `stop`
+(`PATCH /promotions/:id/:action`) ; `availableActions` dit quels boutons montrer.
+Une promotion commencée ne se modifie plus : elle se prolonge ou s'arrête.
+
+### Moteur de prix
+
+`shared/services/pricing.service.ts` recopie sur chaque offre son prix du
+moment (`discountPrice`, l'instantané `promo` et les `quantityTiers`) à chaque
+changement : création, action, fin, sanction, nouveau prix. Le planificateur
+(`marketing.scheduler.ts`, toutes les minutes) démarre et termine les
+promotions à l'heure ; une fois par jour, il recalcule les meilleures ventes
+(`salesCount30d`), purge l'historique des prix et verse les crédits du mois.
+
+- **Prix barré** : le prix de référence est le plus bas pratiqué sur les
+  30 derniers jours (`PriceHistory`). Il ne s'affiche qu'à partir de 5 % de
+  remise : un prix monté puis « barré » ne montre rien.
+- **Une seule remise** : la meilleure des remises en cours, jamais leur somme.
+  Un palier se calcule sur le prix de base ; le client paie le plus bas des deux.
+- **Checkout** : les prix sont recalculés. Une hausse depuis l'ajout au panier
+  répond `409` et rafraîchit le panier ; une baisse s'applique. Un code de
+  boutique ne vaut que sur sa part ; un code de la plateforme est réparti au
+  prorata et payé par elle (`platformDiscount` sur chaque sous-commande).
+  `perCustomerLimit` est contrôlé.
+
+### Campagnes de la plateforme
+
+`POST /campaigns` (admin, 30 jours au plus, remise minimale). Une boutique y
+inscrit des offres (`POST /campaigns/:id/entries`) : cela crée une remise
+produit à ses dates, lancée aussitôt. `GET /campaigns/:slug` liste les offres
+inscrites par une remise de la campagne en cours, même quand une vente flash
+plus forte fixe leur prix du moment.
+
+### Boosts
+
+Comme « booster une publication » : la boutique paie pour que sa promotion
+(`kind: promotion`) ou ses produits (`kind: product`, 10 au plus) soient vus
+par plus de clients, toujours avec la mention « Sponsorisé ».
+
+- **Objectif** : `visits` (payé à la visite d'une fiche, 500 GNF par défaut) ou
+  `views` (aux 1 000 affichages, 5 000 GNF). Prix réglés par l'administration
+  (`PUT /boosts/settings`), figés au lancement.
+- **Audience** : automatique, ou personnalisée (communes, villes, particuliers
+  ou sociétés, nouveaux ou anciens clients). Une audience personnalisée compte
+  au moins 100 clients (`BOOST_MIN_AUDIENCE`) : on ne vise jamais une personne.
+- **Budget** : par jour (20 visites au minimum) × jours (30 au plus, jamais
+  au-delà de la fin de la promotion). Il est réservé sur les crédits de la
+  boutique (`CreditLedger`) ; ce qui n'est pas dépensé revient à la fin. Les
+  crédits s'achètent par le prestataire de paiement (`POST /shops/:id/credits`)
+  et 50 000 GNF sont offerts chaque mois.
+- **Diffusion** (`GET /sponsored?slot=home|search|category|similar|promotions`) :
+  pertinence de la page, 3 affichages par jour et par client, la moitié des
+  places au plus pour une boutique, budget étalé de 7 h à 22 h, tirage pondéré
+  par la qualité et la remise. Une visite (`?src=boost:<id>` sur la fiche) est
+  comptée une fois par jour ; une vente compte quand elle suit une visite dans
+  les 7 jours.
+- Un boost s'arrête seul : durée, budget, promotion terminée, rupture,
+  suspension de la boutique ou sanction `promo_ban`.
+
+### Routes
+
+| Route | Accès |
+| --- | --- |
+| `GET/POST /shops/:id/promotions`, `GET/PUT /shops/:id/promotions/:promotionId` | gérant, admin |
+| `PATCH /promotions/:id/:action` | gérant, admin |
+| `PATCH /product-boutiques/:id/featured` (`rank` 1 à 6, ou `null`) | gérant, admin — produits phares de la vitrine |
+| `GET /product-boutiques?featured=true`, `?sort=best_sellers` | public |
+| `GET /campaigns`, `GET /campaigns/:slug` ; `POST /campaigns`, `PUT /campaigns/:id` | public ; admin |
+| `POST /campaigns/:id/entries` | gérant, admin |
+| `GET/POST /shops/:id/boosts`, `POST /shops/:id/boosts/estimate` | gérant, admin |
+| `GET /boosts/:id`, `PATCH /boosts/:id/pause\|resume\|stop` | gérant, admin |
+| `GET/POST /shops/:id/credits`, `GET /shops/:id/credits/:purchaseId`, `POST /shops/:id/credits/:purchaseId/sandbox` | gérant, admin |
+| `GET /boosts`, `GET/PUT /boosts/settings` | admin (lecture des réglages : connecté) |
+| `GET /sponsored` | public |
 
 ## Tests
 
@@ -457,6 +555,19 @@ sa livraison et sa part du coupon. Livrée devient `completed`, annulée reste
 après la migration si la boutique ne la confirme pas). Idempotente ; le seed
 l'applique à ses commandes de démonstration. La route
 `PATCH /orders/:id/status` a disparu au profit des actions par sous-commande.
+
+### Promotions de boutique
+
+```bash
+npm run migrate:promotions
+```
+
+Avant le moteur de prix, une boutique écrivait `discountPrice` à la main, sans
+date ni prix de référence. Chaque offre dans ce cas reçoit une remise produit
+de sa boutique, du même pourcentage, pour 30 jours ; chaque offre sans
+historique reçoit son prix actuel comme premier prix connu ; puis les prix sont
+recalculés. `discountPrice` n'est plus accepté à la création ni à la
+modification d'une offre. Idempotente.
 
 ### Modes de livraison par boutique
 

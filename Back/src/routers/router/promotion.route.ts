@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { requireAuth, requireRole, requireSelf } from "../../shared/middlewares/auth.middleware.js";
 import { EntityType } from "../../models/user.model.js";
+import { promotionActionOfShop } from "../../controllers/shopPromotion.controller.js";
+import { promotionActionForm } from "../../shared/forms/marketing.form.js";
 import {
   applyCoupon,
   createPromotion,
@@ -250,6 +252,21 @@ promotionRouter.put("/:id", requireAuth, requireRole(EntityType.ADMIN), updatePr
  *           application/json:
  *             schema: { $ref: '#/components/schemas/BaseError' }
  */
+/**
+ * @swagger
+ * /promotions/{id}/{action}:
+ *   patch:
+ *     summary: Lancer, mettre en pause, reprendre, prolonger (endDate) ou arrêter une promotion de boutique
+ *     tags: [Promotions]
+ */
+promotionRouter.patch(
+  "/:id/:action",
+  requireAuth,
+  requireRole(EntityType.SHOP, EntityType.ADMIN),
+  promotionActionForm,
+  promotionActionOfShop
+);
+
 promotionRouter.delete("/:id", requireAuth, requireRole(EntityType.ADMIN), promotionIdParam, deletePromotion);
 
 export default promotionRouter;

@@ -19,6 +19,9 @@ import { ShopOrderAction } from "../helpers/shopOrder.workflow.js";
 import { SUSPENSION_DAYS } from "../helpers/support.workflow.js";
 import { runInTransaction } from "../helpers/transaction.js";
 import { applyShopOrderAction, settleProviderRefund } from "./shopOrder.service.js";
+import { Promotion, PromotionStatus } from "../../models/promotion.model.js";
+import { recomputeOfferPricing } from "./pricing.service.js";
+import { stopShopBoosts } from "./boost.service.js";
 import { deliverNotices, noticesForAction } from "./shopOrder.notifications.js";
 
 // ─────────────────────────────────────────────
@@ -40,6 +43,7 @@ export const SANCTION_LABELS: Record<SanctionType, string> = {
   [SanctionType.WARNING]: "Avertissement",
   [SanctionType.SUSPENSION]: "Suspension",
   [SanctionType.BLOCK]: "Blocage",
+  [SanctionType.PROMO_BAN]: "Promotions suspendues",
 };
 
 /** Quelle mesure vise quoi. */
@@ -48,6 +52,7 @@ const ALLOWED_TARGETS: Record<SanctionType, readonly SanctionTargetKind[]> = {
   [SanctionType.WARNING]: [SanctionTargetKind.SHOP, SanctionTargetKind.USER],
   [SanctionType.SUSPENSION]: [SanctionTargetKind.SHOP],
   [SanctionType.BLOCK]: [SanctionTargetKind.USER],
+  [SanctionType.PROMO_BAN]: [SanctionTargetKind.SHOP],
 };
 
 export interface ApplySanctionInput {
@@ -99,7 +104,7 @@ export const checkSanctionInput = (input: Pick<ApplySanctionInput, "type" | "tar
     return `${SANCTION_LABELS[input.type] ?? "Cette mesure"} ne vise pas cette cible.`;
   }
   if (!input.reason?.trim()) return "Le motif est requis : la personne visée le lira.";
-  if (input.type === SanctionType.SUSPENSION && !SUSPENSION_DAYS.includes(input.days ?? 0)) {
+  if ((input.type === SanctionType.SUSPENSION || input.type === SanctionType.PROMO_BAN) && !SUSPENSION_DAYS.includes(input.days ?? 0)) {
     return `Durée de suspension invalide. Valeurs acceptées : ${SUSPENSION_DAYS.join(", ")} jours.`;
   }
   return null;
@@ -146,7 +151,7 @@ const noticeFor = async (sanction: ISanction, lifted: boolean) => {
     if (!user?.email) return;
     const label = SANCTION_LABELS[sanction.type];
     const until =
-      sanction.type === SanctionType.SUSPENSION && sanction.endsAt && sanction.endsAt < FAR_FUTURE
+      (sanction.type === SanctionType.SUSPENSION || sanction.type === SanctionType.PROMO_BAN) && sanction.endsAt && sanction.endsAt < FAR_FUTURE
         ? ` jusqu'au ${sanction.endsAt.toLocaleDateString("fr-FR")}`
         : "";
     sendNoticeMail({
@@ -203,6 +208,19 @@ export const applySanction = async (input: ApplySanctionInput): Promise<ISanctio
         await shop.save({ session });
         break;
       }
+      case SanctionType.PROMO_BAN: {
+        const shop = target.shop!;
+        endsAt = new Date(now.getTime() + (input.days ?? 7) * DAY);
+        if (!shop.promotionsBlockedUntil || shop.promotionsBlockedUntil < endsAt) shop.promotionsBlockedUntil = endsAt;
+        await shop.save({ session });
+        // Ses promotions en cours ou à venir s'arrêtent.
+        await Promotion.updateMany(
+          { boutiqueId: shop._id, status: { $in: [PromotionStatus.DRAFT, PromotionStatus.SCHEDULED, PromotionStatus.ACTIVE, PromotionStatus.PAUSED] } },
+          { $set: { status: PromotionStatus.STOPPED, stoppedAt: now, stopReason: "Promotions suspendues par la modération." } },
+          { session }
+        );
+        break;
+      }
       case SanctionType.BLOCK: {
         const user = target.user!;
         if (user.blockedAt) throw new HttpError("Ce compte est déjà bloqué.", 409);
@@ -252,6 +270,14 @@ export const applySanction = async (input: ApplySanctionInput): Promise<ISanctio
     if (sanction.suspendedShopIds.length > 0) {
       await cancelOpenParts({ boutiqueId: { $in: sanction.suspendedShopIds } }, "Boutique fermée par la modération.", now);
     }
+  }
+
+  if (sanction.type === SanctionType.PROMO_BAN) {
+    const shopId = String(sanction.target.id);
+    await recomputeOfferPricing({ boutiqueId: shopId }, now).catch((error) => logger.error(`Prix de ${shopId} non recalculés : ${(error as Error).message}`));
+    await stopShopBoosts(shopId, "Promotions suspendues par la modération.", now).catch((error) =>
+      logger.error(`Boosts de ${shopId} non arrêtés : ${(error as Error).message}`)
+    );
   }
 
   logger.info(`Sanction ${sanction.type} sur ${sanction.target.kind} ${String(sanction.target.id)}`);
@@ -314,6 +340,23 @@ export const liftSanction = async (id: string, by: string | null, reason: string
         const shop = await Shop.findById(targetId).session(session);
         if (shop && shop.suspendedUntil) {
           shop.suspendedUntil = await remainingSuspension(shop._id as Types.ObjectId, found._id as Types.ObjectId, now, session);
+          await shop.save({ session });
+        }
+        break;
+      }
+      case SanctionType.PROMO_BAN: {
+        const shop = await Shop.findById(targetId).session(session);
+        if (shop && shop.promotionsBlockedUntil) {
+          // Une autre suspension des promotions encore en cours garde sa date.
+          const others = await Sanction.find({
+            _id: { $ne: found._id },
+            type: SanctionType.PROMO_BAN,
+            "target.id": shop._id,
+            liftedAt: null,
+            endsAt: { $gt: now },
+          }).session(session);
+          const ends = others.map((other) => other.endsAt?.getTime() ?? 0);
+          shop.promotionsBlockedUntil = ends.length > 0 ? new Date(Math.max(...ends)) : null;
           await shop.save({ session });
         }
         break;

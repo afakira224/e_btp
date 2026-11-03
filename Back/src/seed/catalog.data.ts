@@ -137,7 +137,21 @@ export const offers = [
   { key: "casque-securite", product: "casque-securite", shop: "pro-outillage", price: 78000, discountPrice: null, stock: 240, isFeatured: false, tags: ["sécurité", "epi"], rating: 4.2, reviewsCount: 167, daysAgo: 58.0 },
 ] as const;
 
-/** Promotions : la vente flash en cours et deux coupons. Dates en heures autour du lancement du seed. */
+/**
+ * Promotions de boutique (lancées par les boutiques, sans validation) : les
+ * remises du catalogue en deviennent, plus un prix par quantité, une
+ * livraison offerte et un code de boutique. Dates en heures autour du seed.
+ */
+export const shopPromotions = [
+  { key: "paliers-ciment", shop: "depot-matam", nom: "Ciment en gros", type: "quantity_tiers", offers: ["ciment-cem2"], tiers: [{ minQuantity: 50, discountValue: 5 }, { minQuantity: 200, discountValue: 8 }], startsInHours: -72 },
+  { key: "livraison-kaloum", shop: "kaloum-ceramique", nom: "Livraison offerte dès 1 000 000 GNF", type: "free_shipping", minAmount: 1000000, startsInHours: -48, durationHours: 24 * 30 },
+  { key: "code-volta", shop: "volta-electrique", nom: "VOLTA10", type: "coupon", code: "VOLTA10", discountValue: 10, minAmount: 500000, startsInHours: -24, durationHours: 24 * 60 },
+] as const;
+
+/** Campagne de la plateforme en cours : les remises de Dépôt Matam s'y inscrivent. */
+export const campaign = { slug: "rentree-chantier", nom: "Rentrée chantier", description: "Les dépôts baissent leurs prix pour la reprise des chantiers.", minDiscount: 10, startsInHours: -48, durationHours: 24 * 14, shops: ["depot-matam"] } as const;
+
+/** Promotions de la plateforme : la vente flash en cours et deux coupons. Dates en heures autour du lancement du seed. */
 export const promotions = [
   { key: "flash-chantier", nom: "Déstockage chantier", description: "Jusqu'à 20 % sur une sélection de matériaux.", type: "flash_sale", scope: "product_boutique", discountType: "percentage", discountValue: 20, code: null, startsInHours: -24, durationHours: 72, offers: ["ciment-cem2", "carrelage-60", "peinture-facade", "cable-25", "perforateur-sds", "tableau-12", "parpaing-15", "parquet-stratifie", "rouleau-pinceau", "wc-suspendu", "prise-encastree", "meuleuse-125", "betonniere-160"], maxDiscount: null, minAmount: 0 },
   { key: "bienvenue", nom: "Bienvenue", description: "10 % sur votre première commande.", type: "coupon", scope: "cart", discountType: "percentage", discountValue: 10, code: "BIENVENUE10", startsInHours: -720, durationHours: 24 * 365, offers: [], maxDiscount: 100000, minAmount: 200000 },

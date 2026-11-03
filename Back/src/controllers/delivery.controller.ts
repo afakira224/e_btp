@@ -1,7 +1,9 @@
 import type { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import { Shop, type IShop } from "../models/boutique.model.js";
-import { Product, productBoutique } from "../models/product.model.js";
+import { Product, productBoutique, type IProductBoutique } from "../models/product.model.js";
+import { unitPriceFor } from "../shared/helpers/promotion.rules.js";
+import { liveFreeShipping } from "../shared/services/pricing.service.js";
 import { Cart } from "../models/cart.model.js";
 import { CURRENCY } from "../models/delivery.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
@@ -148,13 +150,28 @@ export const getDeliveryQuote = async (req: Request, res: Response) => {
       return [{ offer, quantity: item.quantity, productName: product?.name }];
     });
 
-    const quote = quoteDelivery(lines, shops, selectionFromBody(req.body));
+    // Sous-total aux prix du moment (le checkout les recalcule) ; livraison
+    // offerte quand la part d'une boutique atteint son seuil.
+    const subtotals = new Map<string, number>();
+    let subtotal = 0;
+    for (const line of lines) {
+      const item = cart.items.find(i => i.productBoutiqueId.toString() === line.offer._id.toString())!;
+      const lineTotal = unitPriceFor(line.offer as IProductBoutique, item.quantity) * item.quantity;
+      subtotal += lineTotal;
+      const key = line.offer.boutiqueId.toString();
+      subtotals.set(key, (subtotals.get(key) ?? 0) + lineTotal);
+    }
+    const rules = await liveFreeShipping(shops.map(shop => shop._id), new Date());
+    const freeShipping = new Map(
+      [...rules].map(([shopId, rule]) => [shopId, { minAmount: rule.minAmount, subtotal: subtotals.get(shopId) ?? 0, label: rule.label }])
+    );
+    const quote = quoteDelivery(lines, shops, selectionFromBody(req.body), freeShipping);
 
     logger.info(`Devis de livraison pour ${userId} : ${quote.groups.length} livraison(s), ${quote.shippingFee} ${CURRENCY}`);
 
     const response = BaseResponse.WithSuccess(
       // Coupon exclu : il ne s'applique qu'au checkout, sur les articles.
-      { ...quote, subtotal: cart.amount, total: cart.amount + quote.shippingFee },
+      { ...quote, subtotal, total: subtotal + quote.shippingFee },
       "Devis de livraison calculé"
     );
     return res.status(response.statusCode).json(response);

@@ -42,12 +42,42 @@ export const Product : Model<IProduct> = mongoose.model<IProduct>("product",prod
 
 // Product Boutique
 
+/**
+ * Promotion appliquée à l'offre en ce moment. Calculée par le moteur de prix
+ * (shared/services/pricing.service.ts) à chaque changement d'une promotion
+ * ou du prix : jamais écrite par la boutique.
+ */
+export interface IOfferPromo {
+    promotionId: Types.ObjectId;
+    type: string;
+    label: string;
+    endsAt: Date;
+    /** Prix barré : le plus bas prix pratiqué sur 30 jours, hors promotion. */
+    referencePrice: number;
+    /** Remise affichée par rapport au prix de référence ; 0 quand elle est sous 5 %. */
+    percent: number;
+    flash: boolean;
+    campaignId?: Types.ObjectId | null;
+}
+
+export interface IQuantityTier {
+    minQuantity: number;
+    percent: number;
+}
+
 export interface IProductBoutique extends Document , BaseModel{
     boutiqueId:Types.ObjectId,
     productId:Types.ObjectId,
     urlImages:string[],
     price:number,
-    discountPrice?:number,
+    /** Prix promotionnel en vigueur, calculé par le moteur de prix. */
+    discountPrice?:number | null,
+    promo?: IOfferPromo | null,
+    quantityTiers: IQuantityTier[],
+    /** Unités vendues et livrées sur 30 jours : le classement des meilleures ventes. */
+    salesCount30d: number,
+    /** Produit phare de la vitrine (1 à 6) ; null sinon. */
+    featuredRank?: number | null,
     stock:number,
     isFeatured:boolean,
     tags:string[],
@@ -66,6 +96,28 @@ const productBoutiqeShema = new Schema<IProductBoutique>({
     price:{type:Number, required: true, min: 0},
     // Facultatifs : un produit peut être vendu sans remise et sans avis.
     discountPrice: {type:Number, min: 0, default: null},
+    promo: {
+        type: new Schema<IOfferPromo>({
+            promotionId: { type: Types.ObjectId, ref: "promotion", required: true },
+            type: { type: String, required: true },
+            label: { type: String, required: true },
+            endsAt: { type: Date, required: true },
+            referencePrice: { type: Number, required: true, min: 0 },
+            percent: { type: Number, min: 0, max: 100, default: 0 },
+            flash: { type: Boolean, default: false },
+            campaignId: { type: Types.ObjectId, ref: "campaign", default: null },
+        }, { _id: false }),
+        default: null,
+    },
+    quantityTiers: {
+        type: [new Schema<IQuantityTier>({
+            minQuantity: { type: Number, required: true, min: 2 },
+            percent: { type: Number, required: true, min: 1, max: 70 },
+        }, { _id: false })],
+        default: [],
+    },
+    salesCount30d: {type:Number, min: 0, default: 0},
+    featuredRank: {type:Number, min: 1, max: 6, default: null},
     stock: {type:Number, required:true, min: 0, default: 0},
     isFeatured: {type:Boolean, default:false},
     tags: {type:[String], default: []},
@@ -91,6 +143,11 @@ productBoutiqeShema.index({ createdAt: -1 });
 productBoutiqeShema.index({ reviewsCount: -1 });
 productBoutiqeShema.index({ price: 1 });
 productBoutiqeShema.index({ rating: -1 });
+// Meilleures ventes, offres en promotion, produits phares d'une vitrine.
+productBoutiqeShema.index({ salesCount30d: -1 });
+productBoutiqeShema.index({ "promo.percent": -1 });
+productBoutiqeShema.index({ "promo.campaignId": 1 });
+productBoutiqeShema.index({ boutiqueId: 1, featuredRank: 1 });
 
 productBoutiqeShema.pre(/^find/,function(this: mongoose.Query<unknown,IProductBoutique>){
     this.where({deletedAt:null})

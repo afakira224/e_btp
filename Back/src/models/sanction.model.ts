@@ -16,6 +16,7 @@ export enum SanctionType {
   WARNING    = "warning",    // avertissement écrit
   SUSPENSION = "suspension", // boutique : plus de nouvelle commande
   BLOCK      = "block",      // compte : plus de connexion
+  PROMO_BAN  = "promo_ban",  // boutique : plus de promotion ni de boost
 }
 
 export enum SanctionTargetKind {

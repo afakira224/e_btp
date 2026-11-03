@@ -297,11 +297,11 @@ export function* generateProducts(catalog: ExpandedCatalog, opts: VolumeOptions,
         createdAt: created, updatedAt: created, deletedAt: null,
       };
       const price = Math.round((theme.price * (0.75 + random() * 0.65)) / 500) * 500;
-      const discounted = random() < 0.2;
+      // Les remises viennent des promotions : le catalogue de volume n'en a pas.
       const out = random() < 0.05;
       offers.push({
         _id: new Types.ObjectId(), boutiqueId: shopId, productId: product._id, urlImages: imagesFor(theme.image),
-        price, discountPrice: discounted ? Math.round((price * (0.8 + random() * 0.15)) / 500) * 500 : null,
+        price, discountPrice: null,
         stock: out ? 0 : 1 + Math.floor(random() * 500), isFeatured: random() < 0.005,
         tags: [theme.rayon.toLowerCase(), brand.toLowerCase()],
         rating: Math.round((3.2 + random() * 1.8) * 10) / 10, reviewsCount: Math.floor(random() * 400),

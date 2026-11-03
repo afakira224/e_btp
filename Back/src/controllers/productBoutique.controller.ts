@@ -17,6 +17,11 @@ import { EntityType } from "../models/user.model.js";
 import type { IProductDelivery } from "../models/delivery.model.js";
 import { buildProductDelivery, type ProductDeliveryInput } from "../shared/helpers/delivery.helper.js";
 import { canManageShop } from "../shared/helpers/shopAccess.js";
+import { recordPrice, recomputeOfferPricing } from "../shared/services/pricing.service.js";
+import { recordBoostVisit } from "../shared/services/boost.service.js";
+import { campaignOfferIds, setFeaturedRank } from "../shared/services/promotion.service.js";
+import { viewerOf } from "../shared/helpers/viewer.helper.js";
+import { HttpError } from "../shared/middlewares/error.middleware.js";
 
 const OFFER_FORBIDDEN_MESSAGE = "Vous ne pouvez gérer que les produits de vos propres boutiques.";
 
@@ -61,16 +66,21 @@ const parseStringArray = (value: unknown): string[] => {
 };
 
 // ─────────────────────────────────────────────
-//  GET /product-boutiques?boutiqueId=&productId=&isFeatured=&page=&limit=
+//  GET /product-boutiques?boutiqueId=&productId=&isFeatured=&featured=&sort=&page=&limit=
+//  featured=true : les produits phares d'une vitrine, dans leur ordre.
+//  sort=best_sellers : unités vendues et livrées sur 30 jours.
 // ─────────────────────────────────────────────
 export const getProductBoutiques = async (req: Request, res: Response) => {
   try {
-    const { boutiqueId, productId, isFeatured, page = "1", limit = "10" } = req.query;
+    const { boutiqueId, productId, isFeatured, featured, sort, page = "1", limit = "10" } = req.query;
 
     const filter: Record<string, unknown> = {};
     if (boutiqueId) filter.boutiqueId = boutiqueId;
     if (productId) filter.productId = productId;
     if (isFeatured !== undefined) filter.isFeatured = isFeatured === "true";
+    if (featured === "true") filter.featuredRank = { $ne: null };
+    const listSort: Record<string, 1 | -1> =
+      featured === "true" ? { featuredRank: 1 } : sort === "best_sellers" ? { salesCount30d: -1, createdAt: -1 } : { createdAt: -1 };
 
     // Le filtre par boutique n'a de sens que si la boutique existe. Son
     // gérant (et l'administration) voit aussi les offres masquées par la
@@ -92,7 +102,7 @@ export const getProductBoutiques = async (req: Request, res: Response) => {
     const skip = (pageNum - 1) * limitNum;
 
     const [items, total] = await Promise.all([
-      productBoutique.find(filter).skip(skip).limit(limitNum).sort({ createdAt: -1 }),
+      productBoutique.find(filter).skip(skip).limit(limitNum).sort(listSort),
       productBoutique.countDocuments(filter),
     ]);
 
@@ -164,6 +174,19 @@ export const getProductBoutiqueById = async (req: Request, res: Response) => {
       await recordProductView(String(viewerId), String(id));
     }
 
+    // Arrivée depuis une place sponsorisée (?src=boost:<id>) : la visite est
+    // comptée, et payée pour l'objectif « visites ».
+    const src = typeof req.query.src === "string" ? req.query.src : "";
+    if (src.startsWith("boost:")) {
+      await recordBoostVisit({
+        boostId: src.slice("boost:".length),
+        offerId: id,
+        viewer: viewerOf(req),
+        viewerRole: req.session?.user?.entityType,
+        userAgent: req.get?.("user-agent"),
+      }).catch((error) => logger.warn(`Visite de boost ignorée : ${(error as Error).message}`));
+    }
+
     const product = await Product.findById(item.productId);
 
         if (!product) {
@@ -214,11 +237,11 @@ export const createProductBoutique = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
-    const {
-      boutiqueId, productId, price, discountPrice,
-      stock, isFeatured, tags, rating, reviewsCount,
-    } = req.body;
+    // Le prix remisé vient des promotions (moteur de prix), la note des avis,
+    // et « mis en avant » de l'administration : la boutique ne les écrit pas.
+    const { boutiqueId, productId, price, stock, isFeatured, tags } = req.body;
     const deliveryInput = req.body.delivery as ProductDeliveryInput | undefined;
+    const admin = req.user?.entityType === EntityType.ADMIN;
 
     logger.info(`Création product-boutique : produit ${productId} pour boutique ${boutiqueId}`);
 
@@ -281,12 +304,9 @@ export const createProductBoutique = async (req: Request, res: Response) => {
         productId,
         urlImages,
         price,
-        discountPrice,
         stock,
-        isFeatured: isFeatured ?? false,
+        isFeatured: admin ? (isFeatured ?? false) : false,
         tags: tags ?? [],
-        rating,
-        reviewsCount,
         ...(delivery ? { delivery } : {}),
       }],
       { session }
@@ -294,6 +314,9 @@ export const createProductBoutique = async (req: Request, res: Response) => {
 
     // create() renvoie un tableau : après un succès, le document est bien présent.
     if (!item) throw new Error("La création du produit en boutique a échoué.");
+
+    // Premier prix de l'historique : il sert de prix de référence aux promotions.
+    await recordPrice(item._id, item.price, new Date(), session);
 
     await session.commitTransaction();
 
@@ -334,10 +357,8 @@ export const updateProductBoutique = async (req: Request, res: Response) => {
     }
 
     const id = String(req.params.id);
-    const {
-      boutiqueId, productId, price, discountPrice,
-      stock, isFeatured, tags, rating, reviewsCount,
-    } = req.body;
+    const { boutiqueId, productId, price, stock, isFeatured, tags } = req.body;
+    const admin = req.user?.entityType === EntityType.ADMIN;
     const imagesToRemove = parseStringArray(req.body.imagesToRemove);
     const deliveryInput = req.body.delivery as ProductDeliveryInput | undefined;
 
@@ -411,13 +432,14 @@ export const updateProductBoutique = async (req: Request, res: Response) => {
       item.productId = productId;
     }
 
+    // Un nouveau prix entre dans l'historique : le prix barré d'une promotion
+    // reste le plus bas des 30 derniers jours.
+    const priceChanged = price !== undefined && Number(price) !== item.price;
     if (price !== undefined) item.price = price;
-    if (discountPrice !== undefined) item.discountPrice = discountPrice;
+    if (priceChanged) await recordPrice(item._id, Number(price), new Date(), session);
     if (stock !== undefined) item.stock = stock;
-    if (isFeatured !== undefined) item.isFeatured = isFeatured;
+    if (isFeatured !== undefined && admin) item.isFeatured = isFeatured;
     if (tags !== undefined) item.tags = tags;
-    if (rating !== undefined) item.rating = rating;
-    if (reviewsCount !== undefined) item.reviewsCount = reviewsCount;
 
     // Suppression des images demandées (fichier physique + tableau de l'item)
     if (imagesToRemove.length > 0) {
@@ -433,6 +455,9 @@ export const updateProductBoutique = async (req: Request, res: Response) => {
 
     await item.save({ session });
     await session.commitTransaction();
+
+    // Le prix promotionnel suit le nouveau prix de base.
+    if (priceChanged) await recomputeOfferPricing({ offerIds: [item._id] });
 
     logger.info(`Product-boutique mis à jour : ${id}`);
 
@@ -605,13 +630,14 @@ export const getSuggestions = async (req: Request, res: Response) => {
 //    q, boutiqueId, familleId, categoryId, sousCategoryId,
 //    minPrice, maxPrice, minRating, inStock, isFeatured, discounted,
 //    tags (séparés par des virgules), sort, page, limit
-//  sort ∈ { newest, price_asc, price_desc, rating, popular }
+//  sort ∈ { newest, price_asc, price_desc, rating, popular, best_sellers, discount }
+//  campaignId : les offres inscrites à une campagne de la plateforme.
 // ─────────────────────────────────────────────
 export const searchProductBoutiques = async (req: Request, res: Response) => {
   try {
     const {
       q, boutiqueId, familleId, categoryId, sousCategoryId,
-      minPrice, maxPrice, minRating, inStock, isFeatured, discounted,
+      minPrice, maxPrice, minRating, inStock, isFeatured, discounted, campaignId,
       tags, sort = "newest", page = "1", limit = "10",
     } = req.query as Record<string, string | undefined>;
 
@@ -662,13 +688,16 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
     if (inStock === "true") pbFilter.stock = { $gt: 0 };
     if (isFeatured !== undefined) pbFilter.isFeatured = isFeatured === "true";
     if (tags) pbFilter.tags = { $in: tags.split(",").map(t => t.trim()).filter(Boolean) };
-    // Produits en promo : prix remisé strictement inférieur au prix.
+    // Produits en promotion : une remise affichée de 5 % au moins sous le prix
+    // de référence (le moteur de prix l'écrit), et du stock — une offre en
+    // rupture ne s'affiche plus « en promotion ».
     if (discounted === "true") {
-      // Une remise existe ET elle est inférieure au prix. Sans le premier
-      // test, `null < prix` serait vrai : toutes les offres sans remise
-      // passeraient le filtre.
-      pbFilter.discountPrice = { $ne: null };
-      pbFilter.$expr = { $lt: ["$discountPrice", "$price"] };
+      pbFilter["promo.percent"] = { $gte: 5 };
+      pbFilter.stock = { $gt: 0 };
+    }
+    if (campaignId && mongoose.Types.ObjectId.isValid(campaignId)) {
+      const enrolled = await campaignOfferIds([new mongoose.Types.ObjectId(campaignId)], new Date());
+      pbFilter._id = { $in: enrolled.get(campaignId) ?? [] };
     }
 
     // Tri
@@ -678,6 +707,8 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
       rating: { rating: -1 },
       popular: { reviewsCount: -1 },
       newest: { createdAt: -1 },
+      best_sellers: { salesCount30d: -1, createdAt: -1 },
+      discount: { "promo.percent": -1, createdAt: -1 },
     };
     const sortSpec = sortMap[sort ?? "newest"] ?? { createdAt: -1 };
 
@@ -716,6 +747,36 @@ export const searchProductBoutiques = async (req: Request, res: Response) => {
     return res.status(response.statusCode).json(response);
   } catch (error) {
     logger.error(`Erreur recherche product-boutiques : ${(error as Error).message}`);
+    const response = BaseResponse.ServerError((error as Error).message);
+    return res.status(response.statusCode).json(response);
+  }
+};
+// ─────────────────────────────────────────────
+//  PATCH /product-boutiques/:id/featured   { rank: 1..6 | null }
+//  Les 6 produits phares d'une vitrine, choisis et ordonnés par sa boutique.
+// ─────────────────────────────────────────────
+export const setFeaturedProduct = async (req: Request, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const response = BaseResponse.BadRequest(errors.array().map(e => e.msg).join(" | "));
+      return res.status(422).json(response);
+    }
+    const rank = req.body.rank === null || req.body.rank === undefined ? null : Number(req.body.rank);
+    await setFeaturedRank(req.user, String(req.params.id), rank);
+    const item = await productBoutique.findById(String(req.params.id));
+    const [product, shop] = await Promise.all([Product.findById(item!.productId), Shop.findById(item!.boutiqueId)]);
+    const response = BaseResponse.WithSuccess(
+      toProductBoutiqueResponseDto(item!, shop ?? undefined, product ?? undefined),
+      rank === null ? "Produit retiré des produits phares" : `Produit phare n° ${rank}`
+    );
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      const response = new BaseResponse(false, error.message, error.statusCode, null);
+      return res.status(response.statusCode).json(response);
+    }
+    logger.error(`Erreur produit phare : ${(error as Error).message}`);
     const response = BaseResponse.ServerError((error as Error).message);
     return res.status(response.statusCode).json(response);
   }

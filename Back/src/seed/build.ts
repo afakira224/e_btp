@@ -23,6 +23,8 @@ import {
   offers,
   products,
   promotions,
+  shopPromotions,
+  campaign,
   shops,
   sousCategories,
 } from "./catalog.data.js";
@@ -73,6 +75,8 @@ export interface SeedData {
   products: Doc[];
   productBoutiques: Doc[];
   promotions: Doc[];
+  campaigns: Doc[];
+  priceHistory: Doc[];
   reviews: Doc[];
   addresses: Doc[];
   orders: Doc[];
@@ -183,7 +187,9 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
     const product = need(prdById, o.product, "produit");
     return {
       _id: o._id, boutiqueId: need(shopById, o.shop, "boutique")._id, productId: product._id,
-      urlImages: imagesFor(product.image), price: o.price, discountPrice: o.discountPrice,
+      // Le prix remisé vient des promotions : le moteur de prix l'écrit après l'insertion.
+      urlImages: imagesFor(product.image), price: o.price, discountPrice: null, promo: null, quantityTiers: [],
+      salesCount30d: 0, featuredRank: null,
       stock: o.stock, isFeatured: o.isFeatured, tags: [...o.tags], rating: o.rating, reviewsCount: o.reviewsCount,
       // Sans configuration propre, l'offre suit la livraison de sa boutique.
       delivery: ("delivery" in o
@@ -193,11 +199,31 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
     };
   });
 
+  // ── Historique des prix : un prix par offre, depuis sa mise en vente ──
+  const priceHistoryDocs = offerDocs.map((o) => ({
+    _id: id(), productBoutiqueId: o._id, price: o.price, from: o.createdAt, to: null, ...stamp(o.createdAt),
+  }));
+
+  // ── Campagne de la plateforme ───────────────
+  const campaignStart = new Date(now.getTime() + campaign.startsInHours * HOUR);
+  const campaignDoc = {
+    _id: id(), slug: campaign.slug, nom: campaign.nom, description: campaign.description,
+    startDate: campaignStart, endDate: new Date(campaignStart.getTime() + campaign.durationHours * HOUR),
+    minDiscount: campaign.minDiscount, familleIds: [], image: null, actif: true, createdBy: null,
+    ...stamp(campaignStart),
+  };
+
   // ── Promotions ──────────────────────────────
-  const promotionDocs = promotions.map((p) => {
+  // Champs des promotions écrits ici : l'insertion directe saute les valeurs par défaut du schéma.
+  const promoBase = {
+    status: "active", tiers: [], flashQuantity: null, flashSold: 0, perCustomerLimit: null, stackable: true,
+    campaignId: null, highDiscountConfirmed: false, stoppedAt: null, stopReason: null, createdBy: null, deletedAt: null,
+  };
+  const platformPromotionDocs = promotions.map((p) => {
     const start = new Date(now.getTime() + p.startsInHours * HOUR);
     return {
-      _id: id(), nom: p.nom, description: p.description, type: p.type, scope: p.scope,
+      ...promoBase,
+      _id: id(), boutiqueId: null, nom: p.nom, description: p.description, type: p.type, scope: p.scope,
       discountType: p.discountType, discountValue: p.discountValue, code: p.code,
       startDate: start, endDate: new Date(start.getTime() + p.durationHours * HOUR),
       productBoutiqueIds: p.offers.map((k) => need(offById, k, "offre")._id),
@@ -205,6 +231,43 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
       ...stamp(start < now ? start : now),
     };
   });
+  // Les remises du catalogue deviennent des remises produit de leur boutique,
+  // lancées il y a deux jours pour trois semaines ; celles de Dépôt Matam
+  // sont inscrites à la campagne.
+  const discountStart = new Date(now.getTime() - 2 * DAY);
+  const discountDocs = offers.flatMap((o) => {
+    if (!o.discountPrice) return [];
+    const percent = Math.round(((o.price - o.discountPrice) / o.price) * 100);
+    const inCampaign = (campaign.shops as readonly string[]).includes(o.shop) && percent >= campaign.minDiscount;
+    return [{
+      ...promoBase,
+      _id: id(), boutiqueId: need(shopById, o.shop, "boutique")._id,
+      nom: inCampaign ? `${campaign.nom} — −${percent} %` : `Remise de ${percent} %`, type: "product_discount", scope: "product_boutique",
+      discountType: "percentage", discountValue: percent, code: null,
+      startDate: inCampaign ? campaignStart : discountStart,
+      endDate: inCampaign ? campaignDoc.endDate : new Date(discountStart.getTime() + 21 * DAY),
+      productBoutiqueIds: [need(offById, o.key, "offre")._id], campaignId: inCampaign ? campaignDoc._id : null,
+      minAmount: 0, maxDiscount: null, usageLimit: null, usedCount: 0, actif: true,
+      ...stamp(discountStart),
+    }];
+  });
+  const shopPromotionDocs = shopPromotions.map((p) => {
+    const start = new Date(now.getTime() + p.startsInHours * HOUR);
+    const end = "durationHours" in p ? new Date(start.getTime() + p.durationHours * HOUR) : new Date("9999-12-31T00:00:00.000Z");
+    return {
+      ...promoBase,
+      _id: id(), boutiqueId: need(shopById, p.shop, "boutique")._id, nom: p.nom, type: p.type,
+      scope: p.type === "quantity_tiers" ? "product_boutique" : "cart",
+      discountType: "percentage", discountValue: "discountValue" in p ? p.discountValue : 0,
+      code: "code" in p ? p.code : null, startDate: start, endDate: end,
+      productBoutiqueIds: "offers" in p ? p.offers.map((k) => need(offById, k, "offre")._id) : [],
+      tiers: "tiers" in p ? p.tiers.map((t) => ({ ...t })) : [],
+      perCustomerLimit: p.type === "coupon" ? 1 : null,
+      minAmount: "minAmount" in p ? p.minAmount : 0, maxDiscount: null, usageLimit: null, usedCount: 0, actif: true,
+      ...stamp(start),
+    };
+  });
+  const promotionDocs = [...platformPromotionDocs, ...discountDocs, ...shopPromotionDocs];
 
   // ── Avis : trois clients sur les offres mises en avant ──
   const reviewDocs: Doc[] = [];
@@ -302,7 +365,7 @@ export function buildSeed(now: Date = new Date(), password = "Secret@123"): Seed
     familles: familleDocs, categories: categorieDocs, sousCategories: sousCategorieDocs,
     complementarites: complementariteDocs,
     shops: shopDocs, products: productDocs, productBoutiques: offerDocs,
-    promotions: promotionDocs, reviews: reviewDocs,
+    promotions: promotionDocs, campaigns: [campaignDoc], priceHistory: priceHistoryDocs, reviews: reviewDocs,
     addresses: addressDocs, orders: orderDocs,
     carts: cartDocs, wishlists: wishlistDocs, recentlyViewed: recentDocs,
   };

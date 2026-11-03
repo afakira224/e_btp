@@ -38,11 +38,12 @@ import {
 import { failOrderPayment, restoreCartAfterFailedPayment } from "../shared/services/orderPayment.service.js";
 import { deliverNotices, newPartNotices } from "../shared/services/shopOrder.notifications.js";
 import type { ShopOrderViewer } from "../shared/interfaces/ShopOrder.interfaces.js";
-import { Promotion, PromotionScope } from "../models/promotion.model.js";
+import { Promotion, PromotionStatus } from "../models/promotion.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { toOrderResponseDto, type OrderResponseDto } from "../shared/interfaces/Order.interfaces.js";
-import { computePromotionDiscount, isPromotionActive } from "../shared/interfaces/Promotion.interfaces.js";
+import { customerUsedCode, evaluateCoupon, liveFreeShipping, priceLines, recomputeForPromotion } from "../shared/services/pricing.service.js";
+import { attributedBoost, recordBoostSales } from "../shared/services/boost.service.js";
 import {
   quoteDelivery,
   selectionFromBody,
@@ -207,14 +208,54 @@ export const createOrder = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // ── Prix : recalculés des promotions en vigueur ─────────
+    // Le panier garde le prix vu à l'ajout ; la commande se fait au prix du
+    // moment. Une hausse (promotion terminée, quantité flash vendue) est
+    // refusée : le client revoit son panier, qui a pris les nouveaux prix.
+    // Une baisse s'applique sans rien demander.
+    const now = new Date();
+    const offerOf = (item: { productBoutiqueId: mongoose.Types.ObjectId }) =>
+      productBoutiques.find(p => p._id.toString() === item.productBoutiqueId.toString())!;
+    const productOf = (offer: { productId: mongoose.Types.ObjectId }) =>
+      products.find(pr => pr._id.toString() === offer.productId.toString());
+    const pricedLines = await priceLines(
+      cart.items.map(item => ({ offer: offerOf(item), product: productOf(offerOf(item)), quantity: item.quantity })),
+      now,
+      session
+    );
+    const raised = cart.items.filter((item, index) => (pricedLines[index]?.unitPrice ?? item.price) > item.price);
+    if (raised.length > 0) {
+      await session.abortTransaction();
+      for (const [index, item] of cart.items.entries()) item.price = pricedLines[index]?.unitPrice ?? item.price;
+      const refreshedAmount = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      await Cart.updateOne({ _id: cart._id }, { $set: { items: cart.items, amount: refreshedAmount } });
+      const names = raised.map(item => `« ${productOf(offerOf(item))?.name ?? "un article"} »`);
+      logger.warn(`Checkout refusé pour ${userId} : prix en hausse (${names.join(", ")})`);
+      const response = BaseResponse.Conflict(
+        `Le prix de ${names.join(", ")} a changé : vérifiez votre panier.`
+      );
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Livraison offerte : le seuil se lit sur la part de chaque boutique, remises comprises.
+    const freeShippingRules = await liveFreeShipping(shops.map(shop => shop._id), now, session);
+    const partSubtotals = new Map<string, number>();
+    for (const [index, item] of cart.items.entries()) {
+      const key = offerOf(item).boutiqueId.toString();
+      partSubtotals.set(key, (partSubtotals.get(key) ?? 0) + (pricedLines[index]?.unitPrice ?? item.price) * item.quantity);
+    }
+    const freeShipping = new Map(
+      [...freeShippingRules].map(([shopId, rule]) => [shopId, { minAmount: rule.minAmount, subtotal: partSubtotals.get(shopId) ?? 0, label: rule.label }])
+    );
+
     const quote = quoteDelivery(
       cart.items.map(item => {
-        const offer = productBoutiques.find(p => p._id.toString() === item.productBoutiqueId.toString())!;
-        const product = products.find(pr => pr._id.toString() === offer.productId.toString());
-        return { offer, quantity: item.quantity, productName: product?.name };
+        const offer = offerOf(item);
+        return { offer, quantity: item.quantity, productName: productOf(offer)?.name };
       }),
       shops,
-      selectionFromBody(req.body)
+      selectionFromBody(req.body),
+      freeShipping
     );
 
     if (!quote.ready) {
@@ -274,7 +315,7 @@ export const createOrder = async (req: Request, res: Response) => {
     const orderItems: IOrderItem[] = [];
 
     // Vérification de stock + décrémentation (séquentielle car même session de transaction).
-    for (const item of cart.items) {
+    for (const [index, item] of cart.items.entries()) {
       // Présence vérifiée plus haut.
       const pb = productBoutiques.find(
         p => p._id.toString() === item.productBoutiqueId.toString()
@@ -294,22 +335,40 @@ export const createOrder = async (req: Request, res: Response) => {
 
       const product = products.find(pr => pr._id.toString() === pb.productId.toString());
 
+      const priced = pricedLines[index]!;
       orderItems.push({
         productBoutiqueId: pb._id,
         boutiqueId: pb.boutiqueId,
         productId: pb.productId,
         productName: product?.name,
         urlImages: pb.urlImages,
-        price: item.price,
+        price: priced.unitPrice,
         quantity: item.quantity,
+        basePrice: priced.basePrice,
+        promotionId: priced.promotionId,
+        ...(priced.promotionLabel ? { promotionLabel: priced.promotionLabel } : {}),
+        // Une visite d'un boost dans les 7 jours amène la vente.
+        boostId: await attributedBoost(userId, pb._id, now, session),
       });
+    }
+
+    // Ventes flash : la quantité vendue au prix flash est décomptée ici.
+    const flashUnits = new Map<string, number>();
+    for (const [index, item] of cart.items.entries()) {
+      const flashId = pricedLines[index]?.flashPromotionId;
+      if (flashId) flashUnits.set(flashId, (flashUnits.get(flashId) ?? 0) + item.quantity);
+    }
+    for (const [promotionId, units] of flashUnits) {
+      await Promotion.updateOne({ _id: promotionId }, { $inc: { flashSold: units } }, { session });
     }
 
     const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-    // Application éventuelle d'un coupon.
+    // Application éventuelle d'un code : de la plateforme (réparti au prorata,
+    // payé par la plateforme) ou d'une boutique (sur sa part seule).
     let discountAmount = 0;
     let promotionCode: string | null = null;
+    let couponShopId: string | null = null;
 
     if (code) {
       const normalizedCode = String(code).toUpperCase().trim();
@@ -322,27 +381,34 @@ export const createOrder = async (req: Request, res: Response) => {
         return res.status(response.statusCode).json(response);
       }
 
-      if (!isPromotionActive(promo)) {
+      const result = evaluateCoupon(
+        promo,
+        orderItems.map((item, index) => ({
+          productBoutiqueId: item.productBoutiqueId,
+          boutiqueId: item.boutiqueId,
+          price: item.price,
+          quantity: item.quantity,
+          promoted: pricedLines[index]?.promoted ?? false,
+        })),
+        now
+      );
+      if (result.error) {
         await session.abortTransaction();
-        logger.warn(`Coupon inactif/expiré au checkout : ${normalizedCode}`);
-        const response = BaseResponse.BadRequest("Ce coupon n'est pas valide (inactif, expiré ou épuisé).");
+        logger.warn(`Coupon refusé au checkout : ${normalizedCode} (${result.error})`);
+        const response = BaseResponse.BadRequest(result.error);
         return res.status(response.statusCode).json(response);
       }
 
-      if (promo.scope === PromotionScope.CART && promo.minAmount && subtotal < promo.minAmount) {
+      if (promo.perCustomerLimit != null && (await customerUsedCode(userId, normalizedCode, session)) >= promo.perCustomerLimit) {
         await session.abortTransaction();
         const response = BaseResponse.BadRequest(
-          `Montant minimum non atteint pour ce coupon (requis : ${promo.minAmount}).`
+          promo.perCustomerLimit === 1 ? "Vous avez déjà utilisé ce code." : `Ce code s'utilise ${promo.perCustomerLimit} fois par client.`
         );
         return res.status(response.statusCode).json(response);
       }
 
-      discountAmount = computePromotionDiscount(promo, orderItems);
-      if (discountAmount <= 0) {
-        await session.abortTransaction();
-        const response = BaseResponse.BadRequest("Aucun article de la commande n'est éligible à ce coupon.");
-        return res.status(response.statusCode).json(response);
-      }
+      discountAmount = result.discount;
+      couponShopId = result.boutiqueId;
 
       // Décompte de l'utilisation du coupon.
       promo.usedCount += 1;
@@ -355,7 +421,6 @@ export const createOrder = async (req: Request, res: Response) => {
     // La réduction ne s'applique qu'aux articles ; les frais de port s'ajoutent ensuite.
     const shippingFee = quote.shippingFee;
     const amount = Math.max(0, subtotal - discountAmount) + shippingFee;
-    const now = new Date();
     const orderStatus = online ? OrderStatus.AWAITING_PAYMENT : OrderStatus.IN_PROGRESS;
 
     const [order] = await Order.create(
@@ -396,14 +461,17 @@ export const createOrder = async (req: Request, res: Response) => {
     if (!order) throw new Error("La création de la commande a échoué.");
 
     // ── Sous-commandes : une par boutique ─────────────────
-    // Le coupon est réparti au prorata des sous-totaux : chaque boutique
-    // rembourse, le cas échéant, exactement sa part.
+    // Un code de la plateforme est réparti au prorata des sous-totaux (chaque
+    // boutique rembourse, le cas échéant, exactement sa part) et payé par la
+    // plateforme ; un code de boutique pèse tout entier sur sa part.
     const groups = deliveries.map(delivery => ({
       delivery,
       items: orderItems.filter(item => item.boutiqueId?.toString() === delivery.boutiqueId.toString()),
     }));
     const subtotals = groups.map(group => group.items.reduce((sum, item) => sum + item.price * item.quantity, 0));
-    const shares = allocateDiscount(subtotals, discountAmount);
+    const shares = couponShopId
+      ? groups.map(group => (group.delivery.boutiqueId.toString() === couponShopId ? discountAmount : 0))
+      : allocateDiscount(subtotals, discountAmount);
     const partStatus = online ? ShopOrderStatus.AWAITING_PAYMENT : ShopOrderStatus.PENDING;
     const schedule = scheduleFor(partStatus, now);
 
@@ -420,6 +488,7 @@ export const createOrder = async (req: Request, res: Response) => {
           items: group.items,
           subtotal: partSubtotal,
           discountAmount: partDiscount,
+          platformDiscount: couponShopId ? 0 : partDiscount,
           deliveryFee: group.delivery.fee,
           amount: Math.max(0, partSubtotal - partDiscount) + group.delivery.fee,
           delivery: group.delivery,
@@ -456,6 +525,24 @@ export const createOrder = async (req: Request, res: Response) => {
     await session.commitTransaction();
 
     logger.info(`Commande créée : ${order.reference} (${order._id}), ${parts.length} sous-commande(s)`);
+
+    // Après la transaction : une vente flash dont la quantité est vendue se
+    // termine, et les boosts qui ont amené la vente la comptent.
+    for (const promotionId of flashUnits.keys()) {
+      try {
+        const flash = await Promotion.findById(promotionId);
+        if (flash && flash.flashQuantity != null && flash.flashSold >= flash.flashQuantity && flash.boutiqueId) {
+          flash.status = PromotionStatus.ENDED;
+          await flash.save();
+        }
+        if (flash) await recomputeForPromotion(flash, new Date());
+      } catch (flashError) {
+        logger.error(`Vente flash ${promotionId} non recalculée : ${(flashError as Error).message}`);
+      }
+    }
+    await recordBoostSales(orderItems, now).catch(boostError =>
+      logger.error(`Ventes des boosts non comptées : ${(boostError as Error).message}`)
+    );
 
     // ── Paiement en ligne : lancement chez le prestataire ──
     // Hors transaction : la commande existe, le stock est réservé. Si le

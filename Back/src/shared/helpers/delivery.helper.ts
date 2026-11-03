@@ -159,6 +159,8 @@ export interface DeliveryGroupQuote {
   fee: number | null;
   /** Ce qui empêche cette livraison de partir. */
   error?: string | undefined;
+  /** Livraison offerte par la boutique dès un montant : appliquée, ou ce qu'il reste à ajouter. */
+  freeShipping?: { threshold: number; applied: boolean; remaining: number; label: string } | undefined;
 }
 
 export interface DeliveryQuote {
@@ -174,6 +176,9 @@ export interface DeliverySelection {
   byShop?: ReadonlyMap<string, DeliveryMode> | undefined;
   all?: DeliveryMode | undefined;
 }
+
+/** Livraison offerte par boutique : son seuil, et le montant de la part (après remises). */
+export type FreeShippingByShop = ReadonlyMap<string, { minAmount: number; subtotal: number; label: string }>;
 
 /** Lit le choix du client dans un corps déjà validé (deliverySelectionFields). */
 export const selectionFromBody = (body: {
@@ -195,7 +200,8 @@ export const selectionFromBody = (body: {
 export const quoteDelivery = (
   lines: DeliveryQuoteLine[],
   shops: Pick<IShop, "_id" | "nom" | "adresse" | "delivery">[],
-  selection: DeliverySelection = {}
+  selection: DeliverySelection = {},
+  freeShipping?: FreeShippingByShop
 ): DeliveryQuote => {
   // Regroupement par boutique, dans l'ordre d'apparition au panier.
   const byShop = new Map<string, DeliveryQuoteLine[]>();
@@ -255,6 +261,18 @@ export const quoteDelivery = (
       };
     }
 
+    // Livraison offerte : les frais tombent à 0 quand la part atteint le seuil.
+    const offer = freeShipping?.get(boutiqueId);
+    if (offer) {
+      const applied = offer.subtotal >= offer.minAmount;
+      return {
+        ...base,
+        options,
+        selectedMethod: option.method,
+        fee: applied ? 0 : option.fee,
+        freeShipping: { threshold: offer.minAmount, applied, remaining: Math.max(0, offer.minAmount - offer.subtotal), label: offer.label },
+      };
+    }
     return { ...base, options, selectedMethod: option.method, fee: option.fee };
   });
 

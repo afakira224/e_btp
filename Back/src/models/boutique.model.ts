@@ -12,6 +12,10 @@ export interface IShop extends Document {
   delivery:    IShopDelivery;
   /** Suspendue par la modération jusqu'à cette date : plus de nouvelle commande. */
   suspendedUntil?: Date | null;
+  /** Promotions suspendues par la modération : plus de promotion ni de boost d'ici là. */
+  promotionsBlockedUntil?: Date | null;
+  /** Crédits de boost, en GNF (le registre CreditLedger en garde l'historique). */
+  boostCredits: number;
   deletedAt?:  Date | null;
   createdAt:   Date;
   updatedAt:   Date;
@@ -31,6 +35,8 @@ const shopSchema = new Schema<IShop>(
     // à la lecture (voir DEFAULT_SHOP_MODES).
     delivery:    { type: shopDeliverySchema, default: () => ({}) },
     suspendedUntil: { type: Date, default: null },
+    promotionsBlockedUntil: { type: Date, default: null },
+    boostCredits: { type: Number, min: 0, default: 0 },
     deletedAt:   { type: Date, default: null },
   },
   { timestamps: true }

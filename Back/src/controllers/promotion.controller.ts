@@ -4,6 +4,7 @@ import { validationResult } from "express-validator";
 import {
   Promotion,
   PromotionScope,
+  PromotionStatus,
   PromotionType,
   DiscountType,
   type IPromotion,
@@ -12,6 +13,12 @@ import { Cart, type ICart } from "../models/cart.model.js";
 import BaseResponse from "../shared/BaseResponse/BaseResponse.js";
 import logger from "../shared/logger/logger.js";
 import { isPromotionActive, toPromotionResponseDto } from "../shared/interfaces/Promotion.interfaces.js";
+import { productBoutique } from "../models/product.model.js";
+import { Shop } from "../models/boutique.model.js";
+import { unitPriceFor } from "../shared/helpers/promotion.rules.js";
+import { customerUsedCode, evaluateCoupon } from "../shared/services/pricing.service.js";
+
+const SHOP_PROMOTION_ELSEWHERE = "Une promotion de boutique se gère depuis l'espace de sa boutique.";
 
 // Calcule la réduction applicable à un panier pour une promotion donnée.
 // base = total (scope panier) ou somme des lignes éligibles (scope product_boutique).
@@ -135,7 +142,8 @@ export const getPromotions = async (req: Request, res: Response) => {
   try {
     const { type, scope, actif, activeNow, page = "1", limit = "10" } = req.query;
 
-    const filter: Record<string, unknown> = {};
+    // Les promotions de boutique se lisent depuis leur boutique (/shops/:id/promotions).
+    const filter: Record<string, unknown> = { boutiqueId: null };
     if (type) filter.type = type;
     if (scope) filter.scope = scope;
     if (actif !== undefined) filter.actif = actif === "true";
@@ -190,7 +198,7 @@ export const getPromotionById = async (req: Request, res: Response) => {
     const id = String(req.params.id);
 
     const promo = await Promotion.findById(id);
-    if (!promo) {
+    if (!promo || promo.boutiqueId) {
       logger.warn(`Promotion introuvable : ${id}`);
       const response = BaseResponse.NotFound("Promotion non trouvée");
       return res.status(response.statusCode).json(response);
@@ -232,6 +240,12 @@ export const updatePromotion = async (req: Request, res: Response) => {
       await session.abortTransaction();
       logger.warn(`Promotion introuvable pour mise à jour : ${id}`);
       const response = BaseResponse.NotFound("Promotion non trouvée");
+      return res.status(response.statusCode).json(response);
+    }
+    // L'administration ne touche pas aux promotions d'une boutique.
+    if (promo.boutiqueId) {
+      await session.abortTransaction();
+      const response = BaseResponse.Forbidden(SHOP_PROMOTION_ELSEWHERE);
       return res.status(response.statusCode).json(response);
     }
 
@@ -330,6 +344,11 @@ export const deletePromotion = async (req: Request, res: Response) => {
       const response = BaseResponse.NotFound("Promotion non trouvée");
       return res.status(response.statusCode).json(response);
     }
+    if (promo.boutiqueId) {
+      await session.abortTransaction();
+      const response = BaseResponse.Forbidden(SHOP_PROMOTION_ELSEWHERE);
+      return res.status(response.statusCode).json(response);
+    }
 
     promo.deletedAt = new Date();
     await promo.save({ session });
@@ -373,33 +392,36 @@ export const applyCoupon = async (req: Request, res: Response) => {
       return res.status(response.statusCode).json(response);
     }
 
-    if (!isPromotionActive(promo)) {
-      logger.warn(`Coupon inactif ou expiré : ${normalizedCode}`);
-      const response = BaseResponse.BadRequest("Ce coupon n'est pas valide (inactif, expiré ou épuisé).");
-      return res.status(response.statusCode).json(response);
-    }
-
     const cart = await Cart.findOne({ userId });
     if (!cart || cart.items.length === 0) {
       const response = BaseResponse.BadRequest("Le panier est vide.");
       return res.status(response.statusCode).json(response);
     }
 
-    if (promo.scope === PromotionScope.CART && promo.minAmount && cart.amount < promo.minAmount) {
-      const response = BaseResponse.BadRequest(
-        `Montant minimum non atteint pour ce coupon (requis : ${promo.minAmount}).`
-      );
+    // Mêmes règles qu'au checkout : prix du moment, part de la boutique pour
+    // un code de boutique, articles déjà en promotion exclus s'il n'est pas cumulable.
+    const now = new Date();
+    const offers = await productBoutique.find({ _id: { $in: cart.items.map((item) => item.productBoutiqueId) } });
+    const lines = cart.items.flatMap((item) => {
+      const offer = offers.find((candidate) => String(candidate._id) === String(item.productBoutiqueId));
+      if (!offer) return [];
+      const price = unitPriceFor(offer, item.quantity);
+      return [{ productBoutiqueId: offer._id, boutiqueId: offer.boutiqueId, price, quantity: item.quantity, promoted: price < offer.price }];
+    });
+    const result = evaluateCoupon(promo, lines, now);
+    if (result.error) {
+      logger.warn(`Coupon refusé : ${normalizedCode} (${result.error})`);
+      const response = BaseResponse.BadRequest(result.error);
       return res.status(response.statusCode).json(response);
     }
-
-    const { discount } = computeCartDiscount(promo, cart);
-
-    if (discount <= 0) {
-      const response = BaseResponse.BadRequest("Aucun article du panier n'est éligible à ce coupon.");
+    if (promo.perCustomerLimit != null && (await customerUsedCode(userId, normalizedCode)) >= promo.perCustomerLimit) {
+      const response = BaseResponse.BadRequest(promo.perCustomerLimit === 1 ? "Vous avez déjà utilisé ce code." : `Ce code s'utilise ${promo.perCustomerLimit} fois par client.`);
       return res.status(response.statusCode).json(response);
     }
+    const discount = result.discount;
+    const shop = result.boutiqueId ? await Shop.findById(result.boutiqueId).select("nom") : null;
 
-    const totalBefore = cart.amount;
+    const totalBefore = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
     const totalAfter = Math.max(0, totalBefore - discount);
 
     logger.info(`Coupon ${normalizedCode} appliqué : -${discount} (${totalBefore} → ${totalAfter})`);
@@ -410,6 +432,8 @@ export const applyCoupon = async (req: Request, res: Response) => {
         totalBefore,
         discountAmount: discount,
         totalAfter,
+        // Code de boutique : il ne porte que sur ses articles.
+        ...(shop ? { boutique: { id: String(shop._id), nom: shop.nom } } : {}),
       },
       "Coupon appliqué avec succès"
     );
@@ -429,12 +453,27 @@ export const getActiveFlashSales = async (_req: Request, res: Response) => {
   try {
     const now = new Date();
 
-    const promotions = await Promotion.find({ type: PromotionType.FLASH_SALE, actif: true })
-      .sort({ endDate: 1 });
+    const promotions = await Promotion.find({
+      type: PromotionType.FLASH_SALE,
+      actif: true,
+      status: { $nin: [PromotionStatus.DRAFT, PromotionStatus.PAUSED, PromotionStatus.STOPPED] },
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    }).sort({ endDate: 1 });
 
-    const active = promotions
-      .filter((p) => isPromotionActive(p, now))
-      .map((p) => toPromotionResponseDto(p, now));
+    // Les plus proches de leur fin d'abord ; une vente flash de boutique porte son nom.
+    const live = promotions.filter((p) => isPromotionActive(p, now) && (p.flashQuantity == null || p.flashSold < p.flashQuantity));
+    const shops = await Shop.find({ _id: { $in: live.flatMap((p) => (p.boutiqueId ? [p.boutiqueId] : [])) } }).select("nom");
+    const active = live.map((p) => {
+      const shop = shops.find((candidate) => String(candidate._id) === String(p.boutiqueId));
+      return {
+        ...toPromotionResponseDto(p, now),
+        // Un code de boutique ne s'affiche jamais ici ; une vente flash n'en a pas.
+        code: null,
+        ...(shop ? { boutique: { id: String(shop._id), nom: shop.nom } } : {}),
+        ...(p.flashQuantity != null ? { flashLeft: Math.max(0, p.flashQuantity - p.flashSold) } : {}),
+      };
+    });
 
     logger.info(`Ventes flash actives : ${active.length}`);
 

@@ -18,6 +18,12 @@ import { Counter } from "../models/counter.model.js";
 import { migrateLegacyOrders } from "../migrations/shopOrders.migration.js";
 import { Product, productBoutique } from "../models/product.model.js";
 import { Promotion } from "../models/promotion.model.js";
+import { Campaign } from "../models/campaign.model.js";
+import { PriceHistory } from "../models/priceHistory.model.js";
+import { Boost, BoostExposure, BoostStat, BoostVisit } from "../models/boost.model.js";
+import { CreditLedger, CreditPurchase, PlatformSetting } from "../models/credit.model.js";
+import { recomputeAllPromotedOffers, recomputeSalesCounts } from "../shared/services/pricing.service.js";
+import { grantMonthlyCredits } from "../shared/services/boost.service.js";
 import { RecentlyViewed } from "../models/recentlyViewed.model.js";
 import { Review } from "../models/review.model.js";
 import { Shop } from "../models/boutique.model.js";
@@ -62,6 +68,8 @@ const plan: [keyof SeedData, Model<any>][] = [
   ["shops", Shop],
   ["products", Product],
   ["productBoutiques", productBoutique],
+  ["priceHistory", PriceHistory],
+  ["campaigns", Campaign],
   ["promotions", Promotion],
   ["reviews", Review],
   ["addresses", Address],
@@ -147,6 +155,8 @@ async function main() {
     await ShopOrder.collection.deleteMany({});
     // Le support part de zéro, numérotation comprise.
     for (const model of [SupportTicket, SupportMessage, Sanction, Counter]) await model.collection.deleteMany({});
+    // Boosts, crédits et réglages repartent de zéro.
+    for (const model of [Boost, BoostStat, BoostExposure, BoostVisit, CreditLedger, CreditPurchase, PlatformSetting]) await model.collection.deleteMany({});
     // Les sessions ouvertes pointent vers des comptes supprimés.
     await mongoose.connection.collection("sessions").deleteMany({});
     console.log("Collections du seed vidées.");
@@ -186,6 +196,14 @@ async function main() {
   // la migration les découpe par boutique, comme elle le ferait en production.
   const migrated = await migrateLegacyOrders(now);
   console.log(`  ${String(migrated.parts).padStart(6)}  shopOrders`);
+
+  // Le moteur de prix écrit le prix promotionnel des offres, les meilleures
+  // ventes sortent des commandes livrées, et chaque boutique reçoit ses
+  // crédits de boost du mois.
+  const priced = await recomputeAllPromotedOffers(now);
+  await recomputeSalesCounts(now);
+  const granted = await grantMonthlyCredits(now);
+  console.log(`  ${String(priced).padStart(6)}  offres en promotion (${granted} boutiques créditées)`);
 
   if (catalog) await insertVolume(catalog, options, now);
 
